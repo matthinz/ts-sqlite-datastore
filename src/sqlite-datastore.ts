@@ -140,10 +140,22 @@ export class SqliteDatastore<TTables extends Tables> {
     throw new Error();
   }
 
+  /**
+   * Inserts multiple records into the given table.
+   * @param tableName
+   * @param records The set of records to insert.
+   * @returns {Promise<InsertResult>} A structure describing how the insert went.
+   */
   async insert<TableName extends TableNames<TTables>>(
     tableName: TableName,
     records: RecordFor<TTables[TableName]>[],
   ): Promise<InsertResult>;
+  /**
+   * Inserts a single record inot the given table.
+   * @param tableName
+   * @param record
+   * @returns {Promise<InsertResult>} A structure describing how the insert went.
+   */
   async insert<TableName extends TableNames<TTables>>(
     tableName: TableName,
     record: RecordFor<TTables[TableName]>,

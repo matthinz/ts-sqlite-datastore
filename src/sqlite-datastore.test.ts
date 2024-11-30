@@ -18,35 +18,25 @@ const TEST_TABLES: Tables = {
 };
 
 describe("SqliteDatastore", () => {
-  let dataStore: SqliteDatastore<typeof TEST_TABLES>;
-  let db: Database;
-
-  beforeEach(async () => {
-    [dataStore, db] = await createDataStore({
-      tables: TEST_TABLES,
-    });
-  });
-
-  afterEach(async () => {
-    await dataStore.close();
-  });
-
   describe("constructor", () => {
-    it("uses an in-memory database by default", async () => {
-      const rows = await all(db, "PRAGMA database_list;");
-      expect(rows).toHaveLength(1);
-      expect((rows[0] as any).file).toEqual("");
-    });
+    it(
+      "uses an in-memory database by default",
+      testWithSchema(TEST_TABLES, async (_dataStore, db) => {
+        const rows = await all(db, "PRAGMA database_list;");
+        expect(rows).toHaveLength(1);
+        expect((rows[0] as any).file).toEqual("");
+      }),
+    );
 
     it("allows specifying filename", async () => {
       const dir = await fs.mkdtemp(".sqlite-datastore");
       const filename = path.join(dir, "__test.db");
 
-      let localDataStore: SqliteDatastore<typeof TEST_TABLES>;
-      let localDb: Database;
+      let dataStore: SqliteDatastore<typeof TEST_TABLES>;
+      let db: Database;
 
       try {
-        [localDataStore, localDb] = await createDataStore({
+        [dataStore, db] = await createDataStore({
           tables: TEST_TABLES,
           filename,
         });
@@ -57,7 +47,7 @@ describe("SqliteDatastore", () => {
         const { file } = rows[0] as any;
         expect(file).toEqual(path.resolve(filename));
       } finally {
-        await localDataStore!.close();
+        await dataStore!.close();
         await fs.rmdir(dir, { recursive: true });
       }
     });
@@ -65,70 +55,86 @@ describe("SqliteDatastore", () => {
 
   describe("#insert", () => {
     describe("with 1 record", () => {
-      it("inserts the record", async () => {
-        const result = await dataStore.insert("test", {
-          id: "1234",
-        });
+      it(
+        "inserts the record",
+        testWithSchema(TEST_TABLES, async (dataStore, db) => {
+          const result = await dataStore.insert("test", {
+            id: "1234",
+          });
 
-        expect(result).toEqual({
-          count: 1,
-          lastID: 1,
-        });
+          expect(result).toEqual({
+            count: 1,
+            lastID: 1,
+          });
 
-        const records = await all(db, "SELECT * FROM test");
-        expect(records).toEqual([{ id: "1234", name: null, version: null }]);
-      });
+          const records = await all(db, "SELECT * FROM test");
+          expect(records).toEqual([{ id: "1234", name: null, version: null }]);
+        }),
+      );
     });
 
     describe("with an array of records", () => {
-      it("inserts records", async () => {
-        const result = await dataStore.insert("test", [
-          { id: "1234" },
-          { id: "5678" },
-        ]);
-
-        expect(result).toEqual({
-          count: 2,
-          lastID: 2,
-        });
-
-        const records = await all(db, "SELECT * FROM test");
-        expect(records).toEqual([
-          { id: "1234", name: null, version: null },
-          { id: "5678", name: null, version: null },
-        ]);
-      });
-
-      describe("with different columns specified", () => {
-        it("does not fail", async () => {
-          await dataStore.insert("test", [
-            { id: "1234", name: "foo" },
-            { id: "5678", version: 2 },
+      it(
+        "inserts records",
+        testWithSchema(TEST_TABLES, async (dataStore, db) => {
+          const result = await dataStore.insert("test", [
+            { id: "1234" },
+            { id: "5678" },
           ]);
+
+          expect(result).toEqual({
+            count: 2,
+            lastID: 2,
+          });
+
           const records = await all(db, "SELECT * FROM test");
           expect(records).toEqual([
-            { id: "1234", name: "foo", version: null },
-            { id: "5678", name: null, version: 2 },
+            { id: "1234", name: null, version: null },
+            { id: "5678", name: null, version: null },
           ]);
-        });
+        }),
+      );
+
+      describe("with different columns specified", () => {
+        it(
+          "does not fail",
+          testWithSchema(TEST_TABLES, async (dataStore, db) => {
+            await dataStore.insert("test", [
+              { id: "1234", name: "foo" },
+              { id: "5678", version: 2 },
+            ]);
+            const records = await all(db, "SELECT * FROM test");
+            expect(records).toEqual([
+              { id: "1234", name: "foo", version: null },
+              { id: "5678", name: null, version: 2 },
+            ]);
+          }),
+        );
       });
     });
   });
 
   describe("#migrate", () => {
-    it("creates tables", async () => {
-      await dataStore.migrate();
+    it(
+      "creates tables",
+      testWithSchema(TEST_TABLES, async (dataStore, db) => {
+        await dataStore.migrate();
 
-      const actual = await all(
-        db,
-        "SELECT name FROM sqlite_master WHERE type='table';",
-      );
-      expect(actual).toEqual([{ name: "test" }]);
-    });
-    it("is idempotent", async () => {
-      await dataStore.migrate();
-      await dataStore.migrate();
-    });
+        const actual = await all(
+          db,
+          "SELECT name FROM sqlite_master WHERE type='table';",
+        );
+        expect(actual).toEqual([{ name: "test" }]);
+      }),
+    );
+
+    it(
+      "is idempotent",
+      testWithSchema(TEST_TABLES, async (dataStore, db) => {
+        await dataStore.migrate();
+        await dataStore.migrate();
+      }),
+    );
   });
 });
 
@@ -176,4 +182,20 @@ function run(
       resolve(this);
     });
   });
+}
+
+function testWithSchema<TTables extends Tables>(
+  tables: TTables,
+  test: (dataStore: SqliteDatastore<TTables>, db: Database) => Promise<void>,
+): () => Promise<void> {
+  return async () => {
+    const [dataStore, db] = await createDataStore({
+      tables,
+    });
+    try {
+      await test(dataStore, db);
+    } finally {
+      await dataStore.close();
+    }
+  };
 }
