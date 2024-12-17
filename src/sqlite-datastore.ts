@@ -1,126 +1,323 @@
-import { table } from "node:console";
-import { Database, RunResult, Statement } from "sqlite3";
+import { Database, Statement } from "sqlite3";
+
+/*
+
+# ts-sqlite-datastore
+
+*/
+
+/*
+
+## Column types
+
+sqlite represents data using four types:
+
+- TEXT
+- BLOB
+- INTEGER
+- REAL
+
+*/
 
 /**
- * sqlite supports four native column types.
+ * One of the four native types supported by sqlite.
  */
-export type SqliteNativeType = "TEXT" | "INTEGER" | "REAL" | "BLOB";
+export type SqliteNativeType = "TEXT" | "BLOB" | "INTEGER" | "REAL";
 
-/**
- * These are additional "types" that SqliteDatastore provides.
- * They are implemented in Javascript and use sqlite native types
- * under the hood.
- *
- * These custom types are:
- *
- *   - "date-time" - A Date. Written and read in UTC.
- *   - "json" - A JSON value.
- *   - "id": An autoincrementing integer ID
- *   - "uuid" - A universally unique identifier.
- */
-export type ExtraType = "date-time" | "json" | "id" | "uuid";
+/*
 
-/**
- * A default value for a column.
- *
- * - "timestamp" means use the current date/time.
- * - { literal: x } means use the literal value "X".
- */
-export type DefaultValue = "timestamp" | { literal: unknown };
+These four map *somewhat* cleanly onto Javascript types. Values can also be
+NULL, but we're going to disregard that for now.
 
-type RecordFor<TTable extends TableSpec> = {
-  [key in keyof TTable["columns"]]: unknown;
-};
+The JsTypeForSqliteNativeType helper allows us to convert between sqlite types
+and Javascript types. We also optionally allow specifying nullability here.
 
-export type ColumnSpec = {
-  type: SqliteNativeType | ExtraType;
+*/
+
+export type JsTypeForSqliteNativeType<
+  T extends SqliteNativeType,
+  Nullable extends boolean = false,
+> = Nullable extends true
+  ? T extends "TEXT"
+    ? string | void
+    : T extends "BLOB"
+      ? Buffer | string | void
+      : T extends "INTEGER"
+        ? number | bigint | void
+        : T extends "REAL"
+          ? number | void
+          : never
+  : T extends "TEXT"
+    ? string
+    : T extends "BLOB"
+      ? Buffer | string
+      : T extends "INTEGER"
+        ? number | bigint
+        : T extends "REAL"
+          ? number
+          : never;
+
+/*
+
+## Schemas
+
+Using one of the four native types, we can describe a **Column** in a database.
+
+*/
+
+export type ColumnSchema<
+  T extends SqliteNativeType,
+  Nullable extends boolean = false,
+  DefaultValue = JsTypeForSqliteNativeType<T, true>,
+> = {
+  type: T;
 
   /**
-   * The default value for this column.
+   * Value to insert as a default.
    */
   defaultValue?: DefaultValue;
 
   /**
-   * Whether this column should allow NULL values.
+   * Whether this column can contain NULL values.
    */
-  nullable?: boolean;
+  nullable: Nullable;
 
   /**
-   * Whether values in this column should be unique.
+   * If provided, a function used to parse data from the database into a
+   * native Javascript representation.
+   */
+  parse?: (input: unknown) => JsTypeForSqliteNativeType<T, Nullable>;
+
+  /**
+   * If provided, a function used to serialize native Javascript values
+   * back to a form used by the database.
+   */
+  serialize?: (value: JsTypeForSqliteNativeType<T, Nullable>) => unknown;
+
+  /**
+   * Whether values in this column must be unique.
+   * Defaults to `false`.
    */
   unique?: boolean;
 };
 
-/**
- * Describes an index in the database.
- */
-export type IndexSpec = {
-  columns: string[];
-  unique?: boolean;
-};
+/*
 
-/**
- * Describes the columns and indices for a table.
- */
-export type TableSpec = {
+(Later we'll want to be able to extract a Javascript type from a Column schema.)
+
+*/
+
+export type JsTypeForColumnSchema<
+  T extends ColumnSchema<SqliteNativeType, boolean>,
+> = JsTypeForSqliteNativeType<T["type"], T["nullable"]>;
+
+/*
+
+A Table is composed of one or more Columns.
+
+*/
+
+export type TableSchema = {
   columns: {
-    [columName: string]: ColumnSpec | SqliteNativeType;
-  };
-  indexes?: {
-    [indexName: string]: IndexSpec;
+    [columnName: string]:
+      | ColumnSchema<SqliteNativeType, boolean>
+      | SqliteNativeType;
   };
 };
+
+/*
+
+We will need some utility types for this next bit.
+
+*/
 
 /**
- * My livelihood. A map of table names to their columns.
+ * Make some keys in T optional.
  */
-export type Tables = {
-  [tableName: string]: TableSpec;
+type MakeOptional<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
+
+/**
+ * Extract only the nullable column names from a TableSchema.
+ */
+type NullableColumnNames<T extends TableSchema> = {
+  [columnName in keyof T["columns"]]: T["columns"][columnName] extends SqliteNativeType
+    ? never
+    : T["columns"][columnName] extends ColumnSchema<any, true>
+      ? columnName
+      : never;
+}[keyof T["columns"]];
+
+/**
+ * Extract only the names of columns that have default values set
+ */
+type NamesOfColumnsWithDefaultValues<T extends TableSchema> = {
+  [columnName in keyof T["columns"]]: T["columns"][columnName] extends {
+    defaultValue: any;
+  }
+    ? columnName
+    : never;
+}[keyof T["columns"]];
+
+/*
+
+We'll want to be able to derive a Javascript type for the records a Table
+contains.
+
+*/
+
+export type RecordFor<T extends TableSchema> = {
+  [columnName in keyof T["columns"]]: T["columns"][columnName] extends SqliteNativeType
+    ? JsTypeForSqliteNativeType<T["columns"][columnName]>
+    : T["columns"][columnName] extends ColumnSchema<infer Type, infer Nullable>
+      ? JsTypeForSqliteNativeType<Type, Nullable>
+      : never;
 };
 
-export type TableNames<TTables extends Tables> = keyof TTables;
+/*
 
-export type ColumnNames<TTable extends TableSpec> = keyof TTable["columns"];
+When a column has a default value defined, it doesn't need to be specified
+on insert. InsertRecordFor<T> returns a Record type for the given table, with
+all columns that have default values marked as Optional.
+*/
 
-type InsertResult = {
-  count: number;
-  lastID: number;
+export type InsertRecordFor<T extends TableSchema> = MakeOptional<
+  RecordFor<T>,
+  NullableColumnNames<T> | NamesOfColumnsWithDefaultValues<T>
+>;
+
+/*
+
+A Schema, then, is a set of Tables.
+
+*/
+
+export type Schema = {
+  tables: {
+    [tableName: string]: TableSchema;
+  };
 };
 
-export type SqliteDatastoreOptions<TTables extends Tables> = {
-  tables: TTables;
+/*
 
+We want to be able to pull out the Table names in a schema
+
+*/
+
+export type TableNames<TSchema extends Schema> = keyof TSchema["tables"];
+
+/*
+
+## Creating a SqliteDatastore
+
+*/
+
+export type SqliteDatastoreOptions<TSchema extends Schema> = {
+  schema: TSchema;
+
+  /**
+   * If provided, the name of the sqlite database file to open.
+   * If not provided, an in-memory database will be used.
+   */
   filename?: string;
 
   /**
-   * If provided, this callback will be invoked with the Database object
-   * when it is available. This functionality is intended for test support.
+   * A hook to allow the caller to obtain the Database instance we are working with.
+   * @param err
    * @param db
-   * @returns {void}
    */
-  internals?: (db: Database) => void;
+  onDatabaseReady?: {
+    (err: Error, db: void): void;
+    (err: null, db: Database): void;
+  };
 };
 
-export class SqliteDatastore<TTables extends Tables> {
-  #tables: TTables;
-  #databasePromise: Promise<Database>;
+/*
+
+## Inserting records
+
+We want to be able to cover a few different insertion scenarios:
+
+1. Insert a single record
+2. Insert multiple records
+
+*/
+
+/**
+ * The value returned by an insert operation.
+ */
+export type InsertResult = {
+  /**
+   * The number of records inserted.
+   */
+  readonly count: number;
+
+  /**
+   * For Tables with an auto-incrementing ID column, the set of IDs that were
+   * generated.
+   */
+  readonly ids: Set<number>;
+};
+
+export type InsertOptions<Table extends TableSchema> = {
+  records: InsertRecordFor<Table>[];
+};
+
+/*
+
+## Implementation
+
+*/
+
+export class SqliteDatastore<TSchema extends Schema> {
+  readonly #filename: string;
+  readonly #schema: TSchema;
+  readonly #databasePromise: Promise<Database>;
   #migrated: boolean = false;
 
   constructor({
-    tables,
+    schema,
     filename,
-    internals,
-  }: SqliteDatastoreOptions<TTables>) {
-    this.#tables = tables;
-    this.#databasePromise = openDatabase(filename ?? ":memory:");
+    onDatabaseReady,
+  }: SqliteDatastoreOptions<TSchema>) {
+    this.#filename = filename ?? ":memory:";
+    this.#schema = schema;
+    this.#databasePromise = new Promise((resolve, reject) => {
+      const db = new Database(this.#filename, (err) => {
+        onDatabaseReady = onDatabaseReady ?? (() => {});
 
-    if (internals) {
-      this.#databasePromise.then((db) => {
-        setImmediate(internals, db);
+        if (err) {
+          setImmediate(
+            onDatabaseReady as (err: Error | null, db?: Database) => void,
+            err,
+          );
+          reject(err);
+          return;
+        }
+
+        setImmediate(
+          onDatabaseReady as (err: Error | null, db?: Database) => void,
+          null,
+          db,
+        );
+        resolve(db);
       });
-    }
+    });
   }
 
+  /**
+   * The filename of the database file being used.
+   * For in-memory databases, this will be ':memory:'.
+   * @returns {string}
+   */
+  get filename(): string {
+    return this.#filename;
+  }
+
+  /**
+   * Closes the database. Once closed, no further operations can
+   * be performed on this instance of SqliteDatastore.
+   * @returns {Promise<void>}
+   */
   async close(): Promise<void> {
     return this.#databasePromise.then(
       (db) =>
@@ -136,35 +333,25 @@ export class SqliteDatastore<TTables extends Tables> {
     );
   }
 
-  async delete<TableName extends TableNames<TTables>>() {
-    throw new Error();
-  }
-
   /**
    * Inserts multiple records into the given table.
-   * @param tableName
+   * @param tableName Table to insert into.
    * @param records The set of records to insert.
    * @returns {Promise<InsertResult>} A structure describing how the insert went.
    */
-  async insert<TableName extends TableNames<TTables>>(
+  async insert<TableName extends TableNames<TSchema>>(
     tableName: TableName,
-    records: RecordFor<TTables[TableName]>[],
+    record: InsertRecordFor<TSchema["tables"][TableName]>,
   ): Promise<InsertResult>;
-  /**
-   * Inserts a single record inot the given table.
-   * @param tableName
-   * @param record
-   * @returns {Promise<InsertResult>} A structure describing how the insert went.
-   */
-  async insert<TableName extends TableNames<TTables>>(
+  async insert<TableName extends TableNames<TSchema>>(
     tableName: TableName,
-    record: RecordFor<TTables[TableName]>,
+    records: InsertRecordFor<TSchema["tables"][TableName]>[],
   ): Promise<InsertResult>;
-  async insert<TableName extends TableNames<TTables>>(
+  async insert<TableName extends TableNames<TSchema>>(
     tableName: TableName,
     recordOrRecords:
-      | RecordFor<TTables[TableName]>
-      | RecordFor<TTables[TableName]>[],
+      | InsertRecordFor<TSchema["tables"][TableName]>
+      | InsertRecordFor<TSchema["tables"][TableName]>[],
   ) {
     await this.migrateIfNeeded();
 
@@ -174,10 +361,14 @@ export class SqliteDatastore<TTables extends Tables> {
 
     // Allow different records to specify different
     // column names
-    const columnNameSet = new Set<string>();
+    const columnNameSet = new Set<
+      keyof InsertRecordFor<TSchema["tables"][TableName]>
+    >();
     records.forEach((record) => {
       Object.keys(record).forEach((columnName) =>
-        columnNameSet.add(columnName),
+        columnNameSet.add(
+          columnName as keyof InsertRecordFor<TSchema["tables"][TableName]>,
+        ),
       );
     });
 
@@ -186,7 +377,7 @@ export class SqliteDatastore<TTables extends Tables> {
     const sql = [
       `INSERT INTO "${String(tableName)}" `,
       "(",
-      columnNames.map((c) => `"${c}"`).join(","),
+      columnNames.map((c) => `"${String(c)}"`).join(","),
       ") VALUES (",
       columnNames.map(() => "?").join(","),
       ")",
@@ -207,8 +398,11 @@ export class SqliteDatastore<TTables extends Tables> {
                   return;
                 }
 
-                result.count += 1;
-                result.lastID = this.lastID;
+                (result as any).count += 1;
+
+                if (this.lastID > 0) {
+                  result.ids.add(this.lastID);
+                }
 
                 resolve(result);
               });
@@ -216,7 +410,7 @@ export class SqliteDatastore<TTables extends Tables> {
           }),
         Promise.resolve({
           count: 0,
-          lastID: 0,
+          ids: new Set(),
         }),
       )
       .then(
@@ -237,23 +431,24 @@ export class SqliteDatastore<TTables extends Tables> {
     return this.migrateIfNeeded().then(() => {});
   }
 
-  async select<TableName extends TableNames<TTables>>(tableName: TableName) {}
+  protected createTable(
+    tableName: string,
+    tableSchema: TableSchema,
+  ): Promise<void> {
+    const columns = Object.entries(tableSchema.columns).map(
+      ([columnName, columnSchema]) => {
+        columnSchema =
+          typeof columnSchema === "string"
+            ? { type: columnSchema, nullable: false }
+            : columnSchema;
 
-  async update<TableName extends TableNames<TTables>>() {}
-
-  protected createTable(tableName: string, spec: TableSpec): Promise<void> {
-    const columns = Object.entries(spec.columns).map(
-      ([columnName, columnSpec]) => {
-        columnSpec =
-          typeof columnSpec === "string" ? { type: columnSpec } : columnSpec;
-
-        const { type } = columnSpec;
+        const { type } = columnSchema;
 
         return [
           `"${columnName}"`,
           type,
-          columnSpec.nullable && "NULL",
-          columnSpec.unique && "UNIQUE",
+          columnSchema.nullable && "NULL",
+          columnSchema.unique && "UNIQUE",
         ]
           .filter(Boolean)
           .join(" ");
@@ -290,13 +485,6 @@ export class SqliteDatastore<TTables extends Tables> {
     );
   }
 
-  protected executeStatement(
-    statement: Statement,
-    ...params: unknown[]
-  ): Promise<RunResult> {
-    throw new Error();
-  }
-
   protected migrateIfNeeded(): Promise<Database> {
     return this.#databasePromise.then(async (db) => {
       if (this.#migrated) {
@@ -306,9 +494,9 @@ export class SqliteDatastore<TTables extends Tables> {
       this.#migrated = true;
 
       // Create tables
-      await Object.entries(this.#tables).reduce<Promise<void>>(
-        (promise, [tableName, tableSpec]) =>
-          promise.then(() => this.createTable(tableName, tableSpec)),
+      await Object.entries(this.#schema.tables).reduce<Promise<void>>(
+        (promise, [tableName, tableSchema]) =>
+          promise.then(() => this.createTable(tableName, tableSchema)),
         Promise.resolve(),
       );
 
