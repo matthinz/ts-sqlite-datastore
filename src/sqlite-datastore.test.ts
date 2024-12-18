@@ -64,7 +64,7 @@ describe("SqliteDatastore", () => {
 
           expect(result).toEqual({
             count: 1,
-            ids: new Set([1]),
+            ids: [1],
           });
 
           const records = await all(db, "SELECT * FROM people");
@@ -86,7 +86,7 @@ describe("SqliteDatastore", () => {
 
           expect(result).toEqual({
             count: 2,
-            ids: new Set([1, 2]),
+            ids: [1, 2],
           });
 
           const records = await all(db, "SELECT * FROM people");

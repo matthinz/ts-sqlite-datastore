@@ -69,8 +69,14 @@ export type ColumnSchema<
   T extends SqliteNativeType,
   Nullable extends boolean = false,
   DefaultValue = JsTypeForSqliteNativeType<T, true>,
+  AutoIncrement extends boolean = false,
 > = {
   type: T;
+
+  /**
+   * Whether this column's value should auto-increment.
+   */
+  autoIncrement?: AutoIncrement;
 
   /**
    * Value to insert as a default.
@@ -117,12 +123,13 @@ A Table is composed of one or more Columns.
 
 */
 
-export type TableSchema = {
+export type TableSchema<ColumnNames extends string> = {
   columns: {
-    [columnName: string]:
+    [columnName in ColumnNames]:
       | ColumnSchema<SqliteNativeType, boolean>
       | SqliteNativeType;
   };
+  primaryKey?: ColumnNames | ColumnNames[];
 };
 
 /*
@@ -139,7 +146,7 @@ type MakeOptional<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
 /**
  * Extract only the nullable column names from a TableSchema.
  */
-type NullableColumnNames<T extends TableSchema> = {
+type NullableColumnNames<T extends TableSchema<string>> = {
   [columnName in keyof T["columns"]]: T["columns"][columnName] extends SqliteNativeType
     ? never
     : T["columns"][columnName] extends ColumnSchema<any, true>
@@ -150,7 +157,7 @@ type NullableColumnNames<T extends TableSchema> = {
 /**
  * Extract only the names of columns that have default values set
  */
-type NamesOfColumnsWithDefaultValues<T extends TableSchema> = {
+type NamesOfColumnsWithDefaultValues<T extends TableSchema<string>> = {
   [columnName in keyof T["columns"]]: T["columns"][columnName] extends {
     defaultValue: any;
   }
@@ -165,7 +172,7 @@ contains.
 
 */
 
-export type RecordFor<T extends TableSchema> = {
+export type RecordFor<T extends TableSchema<string>> = {
   [columnName in keyof T["columns"]]: T["columns"][columnName] extends SqliteNativeType
     ? JsTypeForSqliteNativeType<T["columns"][columnName]>
     : T["columns"][columnName] extends ColumnSchema<infer Type, infer Nullable>
@@ -180,7 +187,7 @@ on insert. InsertRecordFor<T> returns a Record type for the given table, with
 all columns that have default values marked as Optional.
 */
 
-export type InsertRecordFor<T extends TableSchema> = MakeOptional<
+export type InsertRecordFor<T extends TableSchema<string>> = MakeOptional<
   RecordFor<T>,
   NullableColumnNames<T> | NamesOfColumnsWithDefaultValues<T>
 >;
@@ -193,7 +200,7 @@ A Schema, then, is a set of Tables.
 
 export type Schema = {
   tables: {
-    [tableName: string]: TableSchema;
+    [tableName: string]: TableSchema<string>;
   };
 };
 
@@ -240,26 +247,71 @@ We want to be able to cover a few different insertion scenarios:
 1. Insert a single record
 2. Insert multiple records
 
+After we insert records, it should be possible to:
+
+- Get the number of records inserted
+- Get the IDs of records that were auto-incremented
+
+However, if the number of records inserted is very large, we might not actually
+care about what IDs were generated.
+
 */
 
 /**
- * The value returned by an insert operation.
+ * The value returned by an insert operation, including the set of
+ * autoincremented IDs that were generated.
  */
-export type InsertResult = {
+type InsertResultWithIds = {
   /**
    * The number of records inserted.
    */
   readonly count: number;
 
   /**
-   * For Tables with an auto-incrementing ID column, the set of IDs that were
-   * generated.
+   * For Tables with an auto-incrementing ID column, the IDs that were
+   * generated. IDs will be returned in the same order that records
+   * were provided.
    */
-  readonly ids: Set<number>;
+  readonly ids: number[];
 };
 
-export type InsertOptions<Table extends TableSchema> = {
-  records: InsertRecordFor<Table>[];
+type InsertResultWithoutIds = {
+  /**
+   * The number of records inserted.
+   */
+  readonly count: number;
+};
+
+type HasAutoIncrementingColumn<T extends TableSchema<string>> = {
+  [columnName in keyof T["columns"]]: T["columns"][columnName] extends {
+    autoIncrement: true;
+  }
+    ? /* Column auto-increments */ true
+    : /* Column does not autoincrement */ false;
+}[keyof T["columns"]] extends true
+  ? true
+  : false;
+
+export type InsertResult<
+  TSchema extends Schema,
+  TableName extends TableNames<TSchema>,
+  Options extends InsertOptions<TSchema, TableName> | undefined = undefined,
+> =
+  HasAutoIncrementingColumn<TSchema["tables"][TableName]> extends true
+    ? Options extends { returnIds: true }
+      ? InsertResultWithIds
+      : Options extends undefined
+        ? InsertResultWithIds
+        : InsertResultWithoutIds
+    : InsertResultWithoutIds;
+
+export type InsertOptions<
+  TSchema extends Schema,
+  TableName extends TableNames<TSchema>,
+> = {
+  records: InsertRecordFor<TSchema["tables"][TableName]>[];
+  returnIds?: boolean;
+  table: TableName;
 };
 
 /*
@@ -342,22 +394,35 @@ export class SqliteDatastore<TSchema extends Schema> {
   async insert<TableName extends TableNames<TSchema>>(
     tableName: TableName,
     record: InsertRecordFor<TSchema["tables"][TableName]>,
-  ): Promise<InsertResult>;
+  ): Promise<InsertResult<TSchema, TableName>>;
   async insert<TableName extends TableNames<TSchema>>(
     tableName: TableName,
     records: InsertRecordFor<TSchema["tables"][TableName]>[],
-  ): Promise<InsertResult>;
+  ): Promise<InsertResult<TSchema, TableName>>;
   async insert<TableName extends TableNames<TSchema>>(
-    tableName: TableName,
-    recordOrRecords:
+    options: InsertOptions<TSchema, TableName>,
+  ): Promise<
+    InsertResult<TSchema, TableName, InsertOptions<TSchema, TableName>>
+  >;
+  async insert<TableName extends TableNames<TSchema>>(
+    tableNameOrInsertOptions: TableName | InsertOptions<TSchema, TableName>,
+    recordOrRecords?:
       | InsertRecordFor<TSchema["tables"][TableName]>
       | InsertRecordFor<TSchema["tables"][TableName]>[],
   ) {
     await this.migrateIfNeeded();
 
-    const records = Array.isArray(recordOrRecords)
-      ? recordOrRecords
-      : [recordOrRecords];
+    const options: InsertOptions<TSchema, TableName> =
+      typeof tableNameOrInsertOptions === "string"
+        ? {
+            records: Array.isArray(recordOrRecords)
+              ? recordOrRecords
+              : [recordOrRecords!],
+            table: tableNameOrInsertOptions,
+          }
+        : (tableNameOrInsertOptions as InsertOptions<TSchema, TableName>);
+
+    const { records, table } = options;
 
     // Allow different records to specify different
     // column names
@@ -375,7 +440,7 @@ export class SqliteDatastore<TSchema extends Schema> {
     const columnNames = Array.from(columnNameSet);
 
     const sql = [
-      `INSERT INTO "${String(tableName)}" `,
+      `INSERT INTO "${String(table)}" `,
       "(",
       columnNames.map((c) => `"${String(c)}"`).join(","),
       ") VALUES (",
@@ -386,7 +451,7 @@ export class SqliteDatastore<TSchema extends Schema> {
     const statement = await this.prepare(sql);
 
     return records
-      .reduce<Promise<InsertResult>>(
+      .reduce<Promise<InsertResult<TSchema, TableName>>>(
         (promise, record) =>
           promise.then((result) => {
             const params = columnNames.map((c) => record[c]);
@@ -400,8 +465,8 @@ export class SqliteDatastore<TSchema extends Schema> {
 
                 (result as any).count += 1;
 
-                if (this.lastID > 0) {
-                  result.ids.add(this.lastID);
+                if (this.lastID > 0 && "ids" in result) {
+                  result.ids.push(this.lastID);
                 }
 
                 resolve(result);
@@ -410,7 +475,7 @@ export class SqliteDatastore<TSchema extends Schema> {
           }),
         Promise.resolve({
           count: 0,
-          ids: new Set(),
+          ids: [],
         }),
       )
       .then(
@@ -433,7 +498,7 @@ export class SqliteDatastore<TSchema extends Schema> {
 
   protected createTable(
     tableName: string,
-    tableSchema: TableSchema,
+    tableSchema: TableSchema<string>,
   ): Promise<void> {
     const columns = Object.entries(tableSchema.columns).map(
       ([columnName, columnSchema]) => {
