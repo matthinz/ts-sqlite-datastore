@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { Database } from "sqlite3";
 import {
+  InsertError,
   InsertRecordFor,
   Schema,
   SqliteDatastore,
@@ -71,6 +72,24 @@ describe("SqliteDatastore", () => {
           expect(records).toEqual([
             { id: "1234", name: "Person A", birthdate: "2000-01-01" },
           ]);
+        }),
+      );
+    });
+
+    describe("with a record that includes columns not present in schema", () => {
+      it(
+        "throws an Error",
+        testWithSchema(TEST_SCHEMA, async (dataStore) => {
+          await expect(
+            dataStore.insert("people", {
+              id: "1234",
+              name: "Person A",
+              birthdate: "2000-01-01",
+              extra: "extra",
+            } as InsertRecordFor<(typeof TEST_SCHEMA)["tables"]["people"]>),
+          ).rejects.toThrow(
+            new InsertError("Column 'extra' not found on table 'people'"),
+          );
         }),
       );
     });

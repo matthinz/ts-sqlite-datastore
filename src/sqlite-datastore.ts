@@ -132,6 +132,9 @@ export type TableSchema<ColumnNames extends string> = {
   primaryKey?: ColumnNames | ColumnNames[];
 };
 
+export type ColumnNames<Table extends TableSchema<string>> =
+  keyof Table["columns"];
+
 /*
 
 We will need some utility types for this next bit.
@@ -320,6 +323,41 @@ export type InsertOptions<
 
 */
 
+/*
+
+### Error classes
+
+We'll wrap errors thrown by the sqlite driver with these classes.
+
+*/
+
+const ERROR_CODES = ["INSERT_ERROR"] as const;
+
+export type ErrorCode = (typeof ERROR_CODES)[number];
+
+/**
+ * This is the base Error class for all SqliteDatastore errors.
+ */
+export abstract class SqliteDatastoreError extends Error {
+  readonly #code: string;
+
+  constructor(message: string, code: ErrorCode) {
+    super(message);
+    this.name = this.constructor.name;
+    this.#code = code;
+  }
+
+  get code(): string {
+    return this.#code;
+  }
+}
+
+export class InsertError extends SqliteDatastoreError {
+  constructor(message: string) {
+    super(message, "INSERT_ERROR");
+  }
+}
+
 export class SqliteDatastore<TSchema extends Schema> {
   readonly #filename: string;
   readonly #schema: TSchema;
@@ -386,19 +424,30 @@ export class SqliteDatastore<TSchema extends Schema> {
   }
 
   /**
-   * Inserts multiple records into the given table.
+   * Inserts a record into the given table.
    * @param tableName Table to insert into.
-   * @param records The set of records to insert.
+   * @param record The record to insert.
    * @returns {Promise<InsertResult>} A structure describing how the insert went.
    */
   async insert<TableName extends TableNames<TSchema>>(
     tableName: TableName,
     record: InsertRecordFor<TSchema["tables"][TableName]>,
   ): Promise<InsertResult<TSchema, TableName>>;
+  /**
+   * Inserts multiple records into the given table.
+   * @param tableName Table to insert into.
+   * @param records The records to insert.
+   * @returns {Promise<InsertResult>} A structure describing how the insert went.
+   */
   async insert<TableName extends TableNames<TSchema>>(
     tableName: TableName,
     records: InsertRecordFor<TSchema["tables"][TableName]>[],
   ): Promise<InsertResult<TSchema, TableName>>;
+  /**
+   * Inserts record(s) into a table, with a number of other options exposed.
+   * @param options Structure describing the insert operation.
+   * @returns {Promise<InsertResult>} A structure describing how the insert went.
+   */
   async insert<TableName extends TableNames<TSchema>>(
     options: InsertOptions<TSchema, TableName>,
   ): Promise<
@@ -422,25 +471,18 @@ export class SqliteDatastore<TSchema extends Schema> {
           }
         : (tableNameOrInsertOptions as InsertOptions<TSchema, TableName>);
 
-    const { records, table } = options;
+    const { records } = options;
+    const tableName = String(options.table);
+    const tableSchema = this.#schema["tables"][tableName];
 
-    // Allow different records to specify different
-    // column names
-    const columnNameSet = new Set<
-      keyof InsertRecordFor<TSchema["tables"][TableName]>
-    >();
-    records.forEach((record) => {
-      Object.keys(record).forEach((columnName) =>
-        columnNameSet.add(
-          columnName as keyof InsertRecordFor<TSchema["tables"][TableName]>,
-        ),
-      );
-    });
-
-    const columnNames = Array.from(columnNameSet);
+    const columnNames = this.getColumnNamesForInsert(
+      tableName,
+      tableSchema,
+      records,
+    );
 
     const sql = [
-      `INSERT INTO "${String(table)}" `,
+      `INSERT INTO "${tableName}" `,
       "(",
       columnNames.map((c) => `"${String(c)}"`).join(","),
       ") VALUES (",
@@ -454,7 +496,9 @@ export class SqliteDatastore<TSchema extends Schema> {
       .reduce<Promise<InsertResult<TSchema, TableName>>>(
         (promise, record) =>
           promise.then((result) => {
-            const params = columnNames.map((c) => record[c]);
+            const params = columnNames.map(
+              (c) => record[c as keyof typeof record],
+            );
 
             return new Promise((resolve, reject) => {
               statement.run(params, function (err) {
@@ -582,6 +626,39 @@ export class SqliteDatastore<TSchema extends Schema> {
           });
         }),
     );
+  }
+
+  private getColumnNamesForInsert<Table extends TableSchema<string>>(
+    tableName: string,
+    tableSchema: Table,
+    records: InsertRecordFor<Table>[],
+  ): ColumnNames<Table>[] {
+    const validColumnNames = new Set<string>(Object.keys(tableSchema.columns));
+
+    // Each incoming record may specify a different set of columns to insert.
+    // We want to build a single INSERT statement to cover all cases.
+    // So first, we need a set of all columns that will be inserted.
+    // TODO: Provide an option ("unchecked"?) to allow faster inserts without
+    // these pre-checks.
+    const columnNameSet = new Set<keyof InsertRecordFor<Table>>();
+
+    for (const record of records) {
+      Object.keys(record).forEach((columnName) => {
+        if (!validColumnNames.has(columnName)) {
+          throw new InsertError(
+            `Column '${columnName}' not found on table '${tableName}'`,
+          );
+        }
+
+        columnNameSet.add(columnName as keyof InsertRecordFor<Table>);
+      });
+
+      if (columnNameSet.size === validColumnNames.size) {
+        break;
+      }
+    }
+
+    return Array.from(columnNameSet);
   }
 }
 
