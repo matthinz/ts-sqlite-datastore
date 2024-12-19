@@ -145,6 +145,25 @@ describe("SqliteDatastore", () => {
       }),
     );
   });
+
+  describe("#select", () => {
+    describe("select all", () => {
+      it(
+        "selects all records",
+        testWithSchema(TEST_SCHEMA, async (dataStore, db) => {
+          await dataStore.insert("people", { name: "foo" });
+          await dataStore.insert("people", { name: "bar" });
+
+          const records = await dataStore.select("people");
+
+          expect(records).toEqual([
+            { id: 1, name: "foo", birthdate: null },
+            { id: 2, name: "bar", birthdate: null },
+          ]);
+        }),
+      );
+    });
+  });
 });
 
 function createDataStore<TSchema extends Schema>(

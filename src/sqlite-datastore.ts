@@ -347,6 +347,19 @@ export type InsertOptions<
 
 /*
 
+## Selecting records
+
+*/
+
+export type SelectOptions<
+  TSchema extends Schema,
+  TableName extends TableNames<TSchema>,
+> = {
+  table: TableName;
+};
+
+/*
+
 ## Implementation
 
 */
@@ -523,27 +536,19 @@ export class SqliteDatastore<TSchema extends Schema> {
     return records
       .reduce<Promise<InsertResult<TSchema, TableName>>>(
         (promise, record) =>
-          promise.then((result) => {
+          promise.then(async (result) => {
             const params = columnNames.map(
               (c) => record[c as keyof typeof record],
             );
 
-            return new Promise((resolve, reject) => {
-              statement.run(params, function (err) {
-                if (err) {
-                  reject(err);
-                  return;
-                }
+            const { lastID } = await this.runStatement(statement, params);
+            (result as any).count += 1;
 
-                (result as any).count += 1;
+            if (lastID > 0 && "ids" in result) {
+              result.ids.push(lastID);
+            }
 
-                if (this.lastID > 0 && "ids" in result) {
-                  result.ids.push(this.lastID);
-                }
-
-                resolve(result);
-              });
-            });
+            return result;
           }),
         Promise.resolve({
           count: 0,
@@ -566,6 +571,52 @@ export class SqliteDatastore<TSchema extends Schema> {
 
   migrate(): Promise<void> {
     return this.migrateIfNeeded().then(() => {});
+  }
+
+  select<TableName extends TableNames<TSchema>>(
+    tableName: TableName,
+  ): Promise<RecordFor<TSchema["tables"][TableName]>[]>;
+  select<TableName extends TableNames<TSchema>>(
+    options: SelectOptions<TSchema, TableName>,
+  ): Promise<RecordFor<TSchema["tables"][TableName]>[]>;
+  select<TableName extends TableNames<TSchema>>(
+    tableNameOrOptions: TableName | SelectOptions<TSchema, TableName>,
+  ): Promise<RecordFor<TSchema["tables"][TableName]>[]> {
+    const options =
+      typeof tableNameOrOptions === "string"
+        ? { table: tableNameOrOptions }
+        : (tableNameOrOptions as SelectOptions<TSchema, TableName>);
+
+    const tableName = String(options.table);
+
+    const sql = `SELECT * FROM "${tableName}"`;
+
+    type ResultRecord = RecordFor<TSchema["tables"][TableName]>;
+
+    return Promise.all([this.migrateIfNeeded(), this.prepare(sql)]).then(
+      ([_, statement]) =>
+        new Promise((resolve, reject) => {
+          const rows = [] as ResultRecord[];
+          statement.each(
+            (err, row) => {
+              if (err) {
+                statement.finalize(() => reject(err));
+                return;
+              }
+              rows.push(row as ResultRecord);
+            },
+            () => {
+              statement.finalize((err) => {
+                if (err) {
+                  reject(err);
+                  return;
+                }
+                resolve(rows);
+              });
+            },
+          );
+        }),
+    );
   }
 
   protected createTable(
@@ -693,5 +744,23 @@ export class SqliteDatastore<TSchema extends Schema> {
     }
 
     return Array.from(columnNameSet);
+  }
+
+  private runStatement(
+    statement: Statement,
+    params?: unknown[],
+  ): Promise<{ lastID: number; changes: number }> {
+    return new Promise((resolve, reject) => {
+      statement.run(params, function (err) {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve({
+          lastID: this.lastID,
+          changes: this.changes,
+        });
+      });
+    });
   }
 }
