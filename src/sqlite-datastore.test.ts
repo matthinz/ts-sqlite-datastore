@@ -13,16 +13,20 @@ const TEST_SCHEMA = {
   tables: {
     people: {
       columns: {
-        id: "TEXT",
+        id: {
+          type: "INTEGER",
+          autoIncrement: true,
+        },
         name: "TEXT",
         birthdate: {
           type: "TEXT",
           nullable: true,
         },
       },
+      primaryKey: "id",
     },
   },
-} as const;
+} satisfies Schema;
 
 type t = InsertRecordFor<(typeof TEST_SCHEMA)["tables"]["people"]>;
 
@@ -58,7 +62,6 @@ describe("SqliteDatastore", () => {
         "inserts the record",
         testWithSchema(TEST_SCHEMA, async (dataStore, db) => {
           const result = await dataStore.insert("people", {
-            id: "1234",
             name: "Person A",
             birthdate: "2000-01-01",
           });
@@ -70,7 +73,7 @@ describe("SqliteDatastore", () => {
 
           const records = await all(db, "SELECT * FROM people");
           expect(records).toEqual([
-            { id: "1234", name: "Person A", birthdate: "2000-01-01" },
+            { id: 1, name: "Person A", birthdate: "2000-01-01" },
           ]);
         }),
       );
@@ -82,7 +85,6 @@ describe("SqliteDatastore", () => {
         testWithSchema(TEST_SCHEMA, async (dataStore) => {
           await expect(
             dataStore.insert("people", {
-              id: "1234",
               name: "Person A",
               birthdate: "2000-01-01",
               extra: "extra",
@@ -99,8 +101,8 @@ describe("SqliteDatastore", () => {
         "inserts records",
         testWithSchema(TEST_SCHEMA, async (dataStore, db) => {
           const result = await dataStore.insert("people", [
-            { id: "1234", name: "foo" },
-            { id: "5678", name: "bar", birthdate: "2000-01-01" },
+            { name: "foo" },
+            { name: "bar", birthdate: "2000-01-01" },
           ]);
 
           expect(result).toEqual({
@@ -110,8 +112,8 @@ describe("SqliteDatastore", () => {
 
           const records = await all(db, "SELECT * FROM people");
           expect(records).toEqual([
-            { id: "1234", name: "foo", birthdate: null },
-            { id: "5678", name: "bar", birthdate: "2000-01-01" },
+            { id: 1, name: "foo", birthdate: null },
+            { id: 2, name: "bar", birthdate: "2000-01-01" },
           ]);
         }),
       );
@@ -128,7 +130,10 @@ describe("SqliteDatastore", () => {
           db,
           "SELECT name FROM sqlite_master WHERE type='table';",
         );
-        expect(actual).toEqual([{ name: "people" }]);
+        expect(actual).toEqual([
+          { name: "people" },
+          { name: "sqlite_sequence" },
+        ]);
       }),
     );
 

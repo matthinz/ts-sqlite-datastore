@@ -36,7 +36,7 @@ and Javascript types. We also optionally allow specifying nullability here.
 
 export type JsTypeForSqliteNativeType<
   T extends SqliteNativeType,
-  Nullable extends boolean = false,
+  Nullable extends boolean | undefined = undefined,
 > = Nullable extends true
   ? T extends "TEXT"
     ? string | void
@@ -67,9 +67,9 @@ Using one of the four native types, we can describe a **Column** in a database.
 
 export type ColumnSchema<
   T extends SqliteNativeType,
-  Nullable extends boolean = false,
+  AutoIncrement extends boolean | undefined,
+  Nullable extends boolean | undefined,
   DefaultValue = JsTypeForSqliteNativeType<T, true>,
-  AutoIncrement extends boolean = false,
 > = {
   type: T;
 
@@ -86,7 +86,7 @@ export type ColumnSchema<
   /**
    * Whether this column can contain NULL values.
    */
-  nullable: Nullable;
+  nullable?: Nullable;
 
   /**
    * If provided, a function used to parse data from the database into a
@@ -114,7 +114,7 @@ export type ColumnSchema<
 */
 
 export type JsTypeForColumnSchema<
-  T extends ColumnSchema<SqliteNativeType, boolean>,
+  T extends ColumnSchema<SqliteNativeType, any, any, any>,
 > = JsTypeForSqliteNativeType<T["type"], T["nullable"]>;
 
 /*
@@ -126,7 +126,7 @@ A Table is composed of one or more Columns.
 export type TableSchema<ColumnNames extends string> = {
   columns: {
     [columnName in ColumnNames]:
-      | ColumnSchema<SqliteNativeType, boolean>
+      | ColumnSchema<SqliteNativeType, any, any>
       | SqliteNativeType;
   };
   primaryKey?: ColumnNames | ColumnNames[];
@@ -146,29 +146,50 @@ We will need some utility types for this next bit.
  */
 type MakeOptional<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
 
+type MapWhereNullableColumnsHaveColumnNameAsValue<
+  T extends TableSchema<string>,
+> = {
+  [columnName in keyof T["columns"]]: T["columns"][columnName] extends SqliteNativeType
+    ? never
+    : T["columns"][columnName] extends ColumnSchema<any, any, true>
+      ? columnName
+      : never;
+};
+
 /**
  * Extract only the nullable column names from a TableSchema.
  */
-type NullableColumnNames<T extends TableSchema<string>> = {
-  [columnName in keyof T["columns"]]: T["columns"][columnName] extends SqliteNativeType
+type NullableColumnNames<T extends TableSchema<string>> =
+  MapWhereNullableColumnsHaveColumnNameAsValue<T>[keyof T["columns"]];
+
+type MapWhereColumnsWithDefaultValueHaveColumnNameAsValue<
+  T extends TableSchema<string>,
+> = {
+  [columnName in keyof T["columns"]]: T["columns"][columnName] extends {
+    defaultValue: void;
+  }
     ? never
-    : T["columns"][columnName] extends ColumnSchema<any, true>
+    : T["columns"][columnName] extends { defaultValue: any }
       ? columnName
       : never;
-}[keyof T["columns"]];
+};
 
 /**
  * Extract only the names of columns that have default values set
  */
-type NamesOfColumnsWithDefaultValues<T extends TableSchema<string>> = {
-  [columnName in keyof T["columns"]]: T["columns"][columnName] extends {
-    defaultValue: any;
-  }
-    ? columnName
-    : never;
-}[keyof T["columns"]];
+type NamesOfColumnsWithDefaultValues<T extends TableSchema<string>> =
+  MapWhereColumnsWithDefaultValueHaveColumnNameAsValue<T>[keyof T["columns"]];
+
+type PrimaryKeyColumnsNames<T extends TableSchema<string>> =
+  T["primaryKey"] extends string
+    ? T["primaryKey"]
+    : T["primaryKey"] extends string[]
+      ? T["primaryKey"][number]
+      : never;
 
 /*
+
+
 
 We'll want to be able to derive a Javascript type for the records a Table
 contains.
@@ -178,7 +199,11 @@ contains.
 export type RecordFor<T extends TableSchema<string>> = {
   [columnName in keyof T["columns"]]: T["columns"][columnName] extends SqliteNativeType
     ? JsTypeForSqliteNativeType<T["columns"][columnName]>
-    : T["columns"][columnName] extends ColumnSchema<infer Type, infer Nullable>
+    : T["columns"][columnName] extends ColumnSchema<
+          infer Type,
+          any,
+          infer Nullable
+        >
       ? JsTypeForSqliteNativeType<Type, Nullable>
       : never;
 };
@@ -190,9 +215,12 @@ on insert. InsertRecordFor<T> returns a Record type for the given table, with
 all columns that have default values marked as Optional.
 */
 
-export type InsertRecordFor<T extends TableSchema<string>> = MakeOptional<
-  RecordFor<T>,
-  NullableColumnNames<T> | NamesOfColumnsWithDefaultValues<T>
+export type InsertRecordFor<T extends TableSchema<string>> = Omit<
+  MakeOptional<
+    RecordFor<T>,
+    NullableColumnNames<T> | NamesOfColumnsWithDefaultValues<T>
+  >,
+  PrimaryKeyColumnsNames<T>
 >;
 
 /*
@@ -473,13 +501,13 @@ export class SqliteDatastore<TSchema extends Schema> {
 
     const { records } = options;
     const tableName = String(options.table);
-    const tableSchema = this.#schema["tables"][tableName];
+    const tableSchema = this.#schema["tables"][
+      tableName
+    ] as TSchema["tables"][TableName];
 
-    const columnNames = this.getColumnNamesForInsert(
-      tableName,
-      tableSchema,
-      records,
-    );
+    const columnNames = this.getColumnNamesForInsert<
+      TSchema["tables"][TableName]
+    >(tableName, tableSchema, records);
 
     const sql = [
       `INSERT INTO "${tableName}" `,
@@ -548,15 +576,21 @@ export class SqliteDatastore<TSchema extends Schema> {
       ([columnName, columnSchema]) => {
         columnSchema =
           typeof columnSchema === "string"
-            ? { type: columnSchema, nullable: false }
+            ? { type: columnSchema }
             : columnSchema;
 
         const { type } = columnSchema;
 
+        const isPrimaryKey = Array.isArray(tableSchema.primaryKey)
+          ? tableSchema.primaryKey.includes(columnName)
+          : tableSchema.primaryKey === columnName;
+
         return [
           `"${columnName}"`,
           type,
-          columnSchema.nullable && "NULL",
+          isPrimaryKey && "PRIMARY KEY",
+          columnSchema.autoIncrement && "AUTOINCREMENT",
+          columnSchema.nullable ? "NULL" : "NOT NULL",
           columnSchema.unique && "UNIQUE",
         ]
           .filter(Boolean)
@@ -660,17 +694,4 @@ export class SqliteDatastore<TSchema extends Schema> {
 
     return Array.from(columnNameSet);
   }
-}
-
-function openDatabase(filename: string): Promise<Database> {
-  return new Promise((resolve, reject) => {
-    const db = new Database(filename, (err) => {
-      if (err) {
-        reject(err);
-        return;
-      }
-
-      resolve(db);
-    });
-  });
 }
