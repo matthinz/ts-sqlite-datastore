@@ -118,6 +118,48 @@ describe("SqliteDatastore", () => {
         }),
       );
     });
+
+    describe("with custom serializer (same type) on column", () => {
+      const SCHEMA = {
+        tables: {
+          events: {
+            columns: {
+              id: {
+                type: "INTEGER",
+                autoIncrement: true,
+              },
+              name: "TEXT",
+              date: {
+                type: "TEXT",
+                serialize: (value: unknown) =>
+                  new Date(String(value)).toISOString(),
+              },
+            },
+            primaryKey: "id",
+          },
+        },
+      } satisfies Schema;
+
+      it(
+        "serializes the value",
+        testWithSchema(SCHEMA, async (dataStore, db) => {
+          await dataStore.insert("events", {
+            name: "Birthday party",
+            date: "2021-02-03 12:13:14Z",
+          });
+
+          const actual = await all(db, "SELECT * FROM events");
+
+          expect(actual).toEqual([
+            {
+              id: 1,
+              name: "Birthday party",
+              date: "2021-02-03T12:13:14.000Z",
+            },
+          ]);
+        }),
+      );
+    });
   });
 
   describe("#migrate", () => {

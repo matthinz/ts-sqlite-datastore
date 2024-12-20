@@ -63,49 +63,57 @@ export type JsTypeForSqliteNativeType<
 
 Using one of the four native types, we can describe a **Column** in a database.
 
+There are a couple of different flavors of column, so we define a few subtypes,
+then combine them all into one ColumnSchema type.
+
 */
 
-export type ColumnSchema<
-  T extends SqliteNativeType,
-  AutoIncrement extends boolean | undefined,
-  Nullable extends boolean | undefined,
-  DefaultValue = JsTypeForSqliteNativeType<T, true>,
-> = {
-  type: T;
+type AutoIncrementableColumnSchema = {
+  type: "INTEGER";
 
   /**
    * Whether this column's value should auto-increment.
    */
-  autoIncrement?: AutoIncrement;
-
-  /**
-   * Value to insert as a default.
-   */
-  defaultValue?: DefaultValue;
-
-  /**
-   * Whether this column can contain NULL values.
-   */
-  nullable?: Nullable;
-
-  /**
-   * If provided, a function used to parse data from the database into a
-   * native Javascript representation.
-   */
-  parse?: (input: unknown) => JsTypeForSqliteNativeType<T, Nullable>;
-
-  /**
-   * If provided, a function used to serialize native Javascript values
-   * back to a form used by the database.
-   */
-  serialize?: (value: JsTypeForSqliteNativeType<T, Nullable>) => unknown;
-
-  /**
-   * Whether values in this column must be unique.
-   * Defaults to `false`.
-   */
-  unique?: boolean;
+  autoIncrement: boolean;
 };
+
+export type ColumnSchema<
+  T extends SqliteNativeType,
+  Nullable extends boolean | undefined,
+  DefaultValue = JsTypeForSqliteNativeType<T, true>,
+> =
+  | AutoIncrementableColumnSchema
+  | {
+      type: T;
+
+      /**
+       * Value to insert as a default.
+       */
+      defaultValue?: DefaultValue;
+
+      /**
+       * Whether this column can contain NULL values.
+       */
+      nullable?: Nullable;
+
+      /**
+       * If provided, a function used to parse data from the database into a
+       * native Javascript representation.
+       */
+      parse?: (input: unknown) => JsTypeForSqliteNativeType<T, Nullable>;
+
+      /**
+       * If provided, a function used to serialize native Javascript values
+       * back to a form used by the database.
+       */
+      serialize?: (value: unknown) => JsTypeForSqliteNativeType<T, Nullable>;
+
+      /**
+       * Whether values in this column must be unique.
+       * Defaults to `false`.
+       */
+      unique?: boolean;
+    };
 
 /*
 
@@ -114,11 +122,14 @@ export type ColumnSchema<
 */
 
 export type JsTypeForColumnSchema<
-  T extends SqliteNativeType | ColumnSchema<SqliteNativeType, any, any, any>,
+  T extends SqliteNativeType | ColumnSchema<SqliteNativeType, any, any>,
 > = T extends SqliteNativeType
   ? JsTypeForSqliteNativeType<T>
-  : T extends ColumnSchema<SqliteNativeType, any, any, any>
-    ? JsTypeForSqliteNativeType<T["type"], T["nullable"]>
+  : T extends ColumnSchema<SqliteNativeType, any, any>
+    ? JsTypeForSqliteNativeType<
+        T["type"],
+        T extends { nullable: boolean } ? T["nullable"] : false
+      >
     : never;
 
 /*
@@ -203,11 +214,7 @@ contains.
 export type RecordFor<T extends TableSchema<string>> = {
   [columnName in keyof T["columns"]]: T["columns"][columnName] extends SqliteNativeType
     ? JsTypeForSqliteNativeType<T["columns"][columnName]>
-    : T["columns"][columnName] extends ColumnSchema<
-          infer Type,
-          any,
-          infer Nullable
-        >
+    : T["columns"][columnName] extends ColumnSchema<infer Type, infer Nullable>
       ? JsTypeForSqliteNativeType<Type, Nullable>
       : never;
 };
@@ -655,9 +662,23 @@ export class SqliteDatastore<TSchema extends Schema> {
       .reduce<Promise<InsertResult<TSchema, TableName>>>(
         (promise, record) =>
           promise.then(async (result) => {
-            const params = columnNames.map(
-              (c) => record[c as keyof typeof record],
-            );
+            const params = columnNames.map((columnName) => {
+              const value = record[columnName as keyof typeof record];
+              const columnSchema =
+                tableSchema.columns[
+                  columnName as keyof typeof tableSchema.columns
+                ];
+
+              if (
+                typeof columnSchema === "object" &&
+                "serialize" in columnSchema &&
+                typeof columnSchema.serialize === "function"
+              ) {
+                return columnSchema.serialize(value);
+              }
+
+              return value;
+            });
 
             const { lastID } = await this.runStatement(statement, params);
             (result as any).count += 1;
@@ -839,13 +860,18 @@ export class SqliteDatastore<TSchema extends Schema> {
           ? tableSchema.primaryKey.includes(columnName)
           : tableSchema.primaryKey === columnName;
 
+        const autoIncrement =
+          "autoIncrement" in columnSchema && columnSchema.autoIncrement;
+        const nullable = "nullable" in columnSchema && !!columnSchema.nullable;
+        const unique = "unique" in columnSchema && !!columnSchema.unique;
+
         return [
           `"${columnName}"`,
           type,
           isPrimaryKey && "PRIMARY KEY",
-          columnSchema.autoIncrement && "AUTOINCREMENT",
-          columnSchema.nullable ? "NULL" : "NOT NULL",
-          columnSchema.unique && "UNIQUE",
+          autoIncrement && "AUTOINCREMENT",
+          nullable ? "NULL" : "NOT NULL",
+          (autoIncrement || unique) && "UNIQUE",
         ]
           .filter(Boolean)
           .join(" ");
