@@ -163,6 +163,22 @@ describe("SqliteDatastore", () => {
         }),
       );
     });
+
+    describe("select with single string criteria", () => {
+      it(
+        "selects records that match the condition",
+        testWithSchema(TEST_SCHEMA, async (dataStore, db) => {
+          await dataStore.insert("people", { name: "foo" });
+          await dataStore.insert("people", { name: "bar" });
+
+          const records = await dataStore.select("people", {
+            where: { name: "foo" },
+          });
+
+          expect(records).toEqual([{ id: 1, name: "foo", birthdate: null }]);
+        }),
+      );
+    });
   });
 });
 

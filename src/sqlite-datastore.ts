@@ -114,8 +114,12 @@ export type ColumnSchema<
 */
 
 export type JsTypeForColumnSchema<
-  T extends ColumnSchema<SqliteNativeType, any, any, any>,
-> = JsTypeForSqliteNativeType<T["type"], T["nullable"]>;
+  T extends SqliteNativeType | ColumnSchema<SqliteNativeType, any, any, any>,
+> = T extends SqliteNativeType
+  ? JsTypeForSqliteNativeType<T>
+  : T extends ColumnSchema<SqliteNativeType, any, any, any>
+    ? JsTypeForSqliteNativeType<T["type"], T["nullable"]>
+    : never;
 
 /*
 
@@ -356,6 +360,54 @@ export type SelectOptions<
   TableName extends TableNames<TSchema>,
 > = {
   table: TableName;
+  where: Criteria<TSchema["tables"][TableName]>;
+};
+
+export type GreaterThanComparison<Table extends TableSchema<string>> = {
+  gt: Table["columns"] | number;
+};
+
+export type GreaterThanOrEqualToComparison<Table extends TableSchema<string>> =
+  {
+    gte: Table["columns"] | number;
+  };
+
+export type LessThanComparison<Table extends TableSchema<string>> = {
+  lt: Table["columns"] | number;
+};
+
+export type LessThanOrEqualToComparison<Table extends TableSchema<string>> = {
+  eq: Table["columns"] | number;
+};
+
+// Track what kinds of values we accept for a column-based criteria
+type ValueOrArray<
+  Table extends TableSchema<string>,
+  ColumnName extends ColumnNames<Table>,
+> =
+  | JsTypeForColumnSchema<Table["columns"][ColumnName]>
+  | JsTypeForColumnSchema<Table["columns"][ColumnName]>[];
+
+type ValueForCriteria<
+  Table extends TableSchema<string>,
+  ColumnName extends ColumnNames<Table>,
+> =
+  JsTypeForColumnSchema<Table["columns"][ColumnName]> extends string
+    ? /* string */ string | string[] | undefined | null
+    : JsTypeForColumnSchema<Table["columns"][ColumnName]> extends number
+      ? /* number */
+        | number
+          | number[]
+          | undefined
+          | null
+          | GreaterThanComparison<Table>
+          | GreaterThanOrEqualToComparison<Table>
+          | LessThanComparison<Table>
+          | LessThanOrEqualToComparison<Table>
+      : never;
+
+export type Criteria<Table extends TableSchema<string>> = {
+  [columnName in ColumnNames<Table>]?: ValueForCriteria<Table, columnName>;
 };
 
 /*
@@ -577,23 +629,43 @@ export class SqliteDatastore<TSchema extends Schema> {
     tableName: TableName,
   ): Promise<RecordFor<TSchema["tables"][TableName]>[]>;
   select<TableName extends TableNames<TSchema>>(
+    tableName: TableName,
+    options: Omit<SelectOptions<TSchema, TableName>, "table">,
+  ): Promise<RecordFor<TSchema["tables"][TableName]>[]>;
+  select<TableName extends TableNames<TSchema>>(
     options: SelectOptions<TSchema, TableName>,
   ): Promise<RecordFor<TSchema["tables"][TableName]>[]>;
   select<TableName extends TableNames<TSchema>>(
     tableNameOrOptions: TableName | SelectOptions<TSchema, TableName>,
+    mayBeOptions?: Omit<SelectOptions<TSchema, TableName>, "table">,
   ): Promise<RecordFor<TSchema["tables"][TableName]>[]> {
+    type O = SelectOptions<TSchema, TableName>;
+
     const options =
       typeof tableNameOrOptions === "string"
-        ? { table: tableNameOrOptions }
-        : (tableNameOrOptions as SelectOptions<TSchema, TableName>);
+        ? mayBeOptions
+          ? ({ ...mayBeOptions, table: tableNameOrOptions } as O)
+          : ({ table: tableNameOrOptions } as O)
+        : (tableNameOrOptions as O);
 
     const tableName = String(options.table);
 
-    const sql = `SELECT * FROM "${tableName}"`;
+    const sql = [`SELECT * FROM "${tableName}"`];
+    const params: unknown[] = [];
+
+    const [whereClause, whereParams] = this.buildWhereClause(options.where);
+
+    if (whereClause) {
+      sql.push(whereClause);
+      params.push(...whereParams);
+    }
 
     type ResultRecord = RecordFor<TSchema["tables"][TableName]>;
 
-    return Promise.all([this.migrateIfNeeded(), this.prepare(sql)]).then(
+    return Promise.all([
+      this.migrateIfNeeded(),
+      this.prepare(sql.join(" "), params),
+    ]).then(
       ([_, statement]) =>
         new Promise((resolve, reject) => {
           const rows = [] as ResultRecord[];
@@ -617,6 +689,71 @@ export class SqliteDatastore<TSchema extends Schema> {
           );
         }),
     );
+  }
+
+  protected buildWhereClause<Table extends TableSchema<string>>(
+    where: Criteria<Table> | undefined,
+  ): [string, unknown[]] {
+    const [criteriaSql, params] = buildCriteriaSql(where);
+
+    if (criteriaSql.length > 0) {
+      return [`WHERE ${criteriaSql}`, params];
+    }
+
+    return ["", []];
+
+    function buildCriteriaSql(
+      criteria: Criteria<Table> | undefined,
+    ): [string, unknown[]] {
+      if (!criteria) {
+        return ["", []];
+      }
+
+      const [sql, params] = Object.entries(criteria).reduce<
+        [string[], unknown[]]
+      >(
+        ([sql, params], [columnName, value]) => {
+          if (Array.isArray(value)) {
+            const placeholders: string[] = [];
+            value.forEach((v) => {
+              placeholders.push("?");
+              params.push(v);
+            });
+            sql.push(`("${columnName}" IN (${placeholders.join(",")}))`);
+          } else if (typeof value === "object") {
+            if ("gt" in value) {
+              params.push(value.gt);
+              sql.push(`"${columnName}" > ?`);
+            }
+
+            if ("gte" in value) {
+              sql.push(`"${columnName}" >= ?`);
+              params.push(value.gte);
+            }
+
+            if ("lt" in value) {
+              sql.push(`"${columnName}" < ?`);
+              params.push(value.lt);
+            }
+
+            if ("lte" in value) {
+              sql.push(`"${columnName}" <= ?`);
+              params.push(value.lte);
+            }
+          } else if (value == null) {
+            sql.push(`("${columnName}" IS NULL)`);
+          } else {
+            sql.push(`("${columnName}" = ?)`);
+            params.push(value);
+          }
+
+          return [sql, params];
+        },
+        [[], []],
+      );
+
+      return [sql.join(" AND `"), params];
+    }
   }
 
   protected createTable(
@@ -698,11 +835,11 @@ export class SqliteDatastore<TSchema extends Schema> {
     });
   }
 
-  protected prepare(sql: string): Promise<Statement> {
+  protected prepare(sql: string, params?: unknown[]): Promise<Statement> {
     return this.#databasePromise.then(
       (db) =>
         new Promise((resolve, reject) => {
-          db.prepare(sql, function (err) {
+          db.prepare(sql, params, function (err) {
             if (err) {
               reject(err);
               return;
