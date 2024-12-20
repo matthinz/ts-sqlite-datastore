@@ -381,13 +381,6 @@ export type LessThanOrEqualToComparison<Table extends TableSchema<string>> = {
 };
 
 // Track what kinds of values we accept for a column-based criteria
-type ValueOrArray<
-  Table extends TableSchema<string>,
-  ColumnName extends ColumnNames<Table>,
-> =
-  | JsTypeForColumnSchema<Table["columns"][ColumnName]>
-  | JsTypeForColumnSchema<Table["columns"][ColumnName]>[];
-
 type ValueForCriteria<
   Table extends TableSchema<string>,
   ColumnName extends ColumnNames<Table>,
@@ -408,6 +401,20 @@ type ValueForCriteria<
 
 export type Criteria<Table extends TableSchema<string>> = {
   [columnName in ColumnNames<Table>]?: ValueForCriteria<Table, columnName>;
+};
+
+/*
+
+## Counting records
+
+*/
+
+export type CountOptions<
+  TSchema extends Schema,
+  TableName extends TableNames<TSchema>,
+> = {
+  table: TableName;
+  where?: Criteria<TSchema["tables"][TableName]>;
 };
 
 /*
@@ -511,6 +518,65 @@ export class SqliteDatastore<TSchema extends Schema> {
               return;
             }
             resolve();
+          });
+        }),
+    );
+  }
+
+  count<TableName extends TableNames<TSchema>>(
+    tableName: TableName,
+  ): Promise<number>;
+  count<TableName extends TableNames<TSchema>>(
+    tableName: TableName,
+    options: Omit<CountOptions<TSchema, TableName>, "table">,
+  ): Promise<number>;
+  count<TableName extends TableNames<TSchema>>(
+    options: CountOptions<TSchema, TableName>,
+  ): Promise<number>;
+  count<TableName extends TableNames<TSchema>>(
+    tableNameOrOptions: CountOptions<TSchema, TableName> | TableName,
+    mayBeOptions?: Omit<CountOptions<TSchema, TableName>, "table">,
+  ): Promise<number> {
+    type O = SelectOptions<TSchema, TableName>;
+
+    const options =
+      typeof tableNameOrOptions === "string"
+        ? mayBeOptions
+          ? ({ ...mayBeOptions, table: tableNameOrOptions } as O)
+          : ({ table: tableNameOrOptions } as O)
+        : (tableNameOrOptions as O);
+
+    const tableName = String(options.table);
+
+    const sql = [`SELECT COUNT(*) FROM "${tableName}"`];
+    const params: unknown[] = [];
+
+    const [whereClause, whereParams] = this.buildWhereClause(options.where);
+
+    if (whereClause) {
+      sql.push(whereClause);
+      params.push(...whereParams);
+    }
+
+    return Promise.all([
+      this.migrateIfNeeded(),
+      this.prepare(sql.join(" "), params),
+    ]).then(
+      ([_, statement]) =>
+        new Promise<number>((resolve, reject) => {
+          statement.get((err, row) => {
+            if (err) {
+              statement.finalize(() => reject(err));
+              return;
+            }
+
+            statement.finalize((err) => {
+              if (err) {
+                reject(err);
+                return;
+              }
+              resolve(Number((row as any)["COUNT(*)"]));
+            });
           });
         }),
     );

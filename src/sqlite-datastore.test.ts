@@ -179,6 +179,43 @@ describe("SqliteDatastore", () => {
         }),
       );
     });
+
+    describe("select with single string array criteria", () => {
+      it(
+        "selects records that match the condition",
+        testWithSchema(TEST_SCHEMA, async (dataStore, db) => {
+          await dataStore.insert("people", { name: "foo" });
+          await dataStore.insert("people", { name: "bar" });
+          await dataStore.insert("people", { name: "baz" });
+
+          const records = await dataStore.select("people", {
+            where: { name: ["foo", "bar"] },
+          });
+
+          expect(records).toEqual([
+            { id: 1, name: "foo", birthdate: null },
+            { id: 2, name: "bar", birthdate: null },
+          ]);
+        }),
+      );
+    });
+  });
+
+  describe("#count", () => {
+    it(
+      "returns the count of records",
+      testWithSchema(TEST_SCHEMA, async (dataStore, db) => {
+        await dataStore.insert("people", { name: "foo" });
+        await dataStore.insert("people", { name: "bar" });
+        await dataStore.insert("people", { name: "baz" });
+
+        const count = await dataStore.count("people", {
+          where: { name: ["foo", "bar"] },
+        });
+
+        expect(count).toEqual(2);
+      }),
+    );
   });
 });
 
