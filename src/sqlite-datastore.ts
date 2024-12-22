@@ -438,7 +438,7 @@ We'll wrap errors thrown by the sqlite driver with these classes.
 
 */
 
-const ERROR_CODES = ["INSERT_ERROR"] as const;
+const ERROR_CODES = ["INSERT_ERROR", "INVALID_SCHEMA"] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
 
@@ -462,6 +462,12 @@ export abstract class SqliteDatastoreError extends Error {
 export class InsertError extends SqliteDatastoreError {
   constructor(message: string) {
     super(message, "INSERT_ERROR");
+  }
+}
+
+export class InvalidSchemaError extends SqliteDatastoreError {
+  constructor(message: string) {
+    super(message, "INVALID_SCHEMA");
   }
 }
 
@@ -864,6 +870,12 @@ export class SqliteDatastore<TSchema extends Schema> {
           "autoIncrement" in columnSchema && columnSchema.autoIncrement;
         const nullable = "nullable" in columnSchema && !!columnSchema.nullable;
         const unique = "unique" in columnSchema && !!columnSchema.unique;
+
+        if (autoIncrement && !isPrimaryKey) {
+          throw new InvalidSchemaError(
+            `Column '${columnName}' in table '${tableName}' is marked as auto-incrementing but is not part of the table's primary key.`,
+          );
+        }
 
         return [
           `"${columnName}"`,

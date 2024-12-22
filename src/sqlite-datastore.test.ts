@@ -4,6 +4,7 @@ import { Database } from "sqlite3";
 import {
   InsertError,
   InsertRecordFor,
+  InvalidSchemaError,
   Schema,
   SqliteDatastore,
   SqliteDatastoreOptions,
@@ -53,6 +54,34 @@ describe("SqliteDatastore", () => {
       } finally {
         await fs.rm(dir, { recursive: true });
       }
+    });
+
+    describe("with autoincrement column that is not primary key", () => {
+      const SCHEMA = {
+        tables: {
+          people: {
+            columns: {
+              id: {
+                type: "INTEGER",
+                autoIncrement: true,
+              },
+              name: "TEXT",
+            },
+          },
+        },
+      } satisfies Schema;
+
+      it("throws an Error", async () => {
+        const [dataStore] = await createDataStore({
+          schema: SCHEMA,
+        });
+
+        expect(dataStore.migrate()).rejects.toThrow(
+          new InvalidSchemaError(
+            "Column 'id' in table 'people' is marked as auto-incrementing but is not part of the table's primary key.",
+          ),
+        );
+      });
     });
   });
 
