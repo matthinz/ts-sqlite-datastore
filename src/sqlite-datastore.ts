@@ -36,16 +36,16 @@ and Javascript types. We also optionally allow specifying nullability here.
 
 export type JsTypeForSqliteNativeType<
   T extends SqliteNativeType,
-  Nullable extends boolean | undefined = undefined,
+  Nullable extends boolean | undefined,
 > = Nullable extends true
   ? T extends "TEXT"
-    ? string | void
+    ? string | null
     : T extends "BLOB"
-      ? Buffer | string | void
+      ? Buffer | string | null
       : T extends "INTEGER"
-        ? number | bigint | void
+        ? number | bigint | null
         : T extends "REAL"
-          ? number | void
+          ? number | null
           : never
   : T extends "TEXT"
     ? string
@@ -79,8 +79,9 @@ type AutoIncrementableColumnSchema = {
 
 export type ColumnSchema<
   T extends SqliteNativeType,
+  ParsedType,
   Nullable extends boolean | undefined,
-  DefaultValue = JsTypeForSqliteNativeType<T, true>,
+  DefaultValue = JsTypeForSqliteNativeType<T, true> | undefined,
 > =
   | AutoIncrementableColumnSchema
   | {
@@ -100,7 +101,7 @@ export type ColumnSchema<
        * If provided, a function used to parse data from the database into a
        * native Javascript representation.
        */
-      parse?: (input: unknown) => JsTypeForSqliteNativeType<T, Nullable>;
+      parse?: (value: JsTypeForSqliteNativeType<T, Nullable>) => ParsedType;
 
       /**
        * If provided, a function used to serialize native Javascript values
@@ -122,14 +123,30 @@ export type ColumnSchema<
 */
 
 export type JsTypeForColumnSchema<
-  T extends SqliteNativeType | ColumnSchema<SqliteNativeType, any, any>,
-> = T extends SqliteNativeType
-  ? JsTypeForSqliteNativeType<T>
-  : T extends ColumnSchema<SqliteNativeType, any, any>
-    ? JsTypeForSqliteNativeType<
-        T["type"],
-        T extends { nullable: boolean } ? T["nullable"] : false
+  ColumnSchemaType extends
+    | SqliteNativeType
+    | ColumnSchema<SqliteNativeType, any, any>,
+> = ColumnSchemaType extends SqliteNativeType
+  ? // We've been given a literal string, e.g. "TEXT"
+    JsTypeForSqliteNativeType<ColumnSchemaType, false>
+  : // We've been given a ColumnSchema, e.g. { "type": "TEXT" }
+    ColumnSchemaType extends ColumnSchema<
+        infer T,
+        infer ParsedType,
+        infer Nullable
       >
+    ? ColumnSchemaType extends {
+        type: T;
+        parse: (input: JsTypeForSqliteNativeType<T, Nullable>) => ParsedType;
+      }
+      ? // A parse function was provided, so use its return type
+        ParsedType
+      : // No parse function was provided, so use the specified type
+        Nullable extends true
+        ? // Column is nullable
+          JsTypeForSqliteNativeType<T, true>
+        : // Column is not nullable
+          JsTypeForSqliteNativeType<T, false>
     : never;
 
 /*
@@ -141,7 +158,7 @@ A Table is composed of one or more Columns.
 export type TableSchema<ColumnNames extends string> = {
   columns: {
     [columnName in ColumnNames]:
-      | ColumnSchema<SqliteNativeType, any, any>
+      | ColumnSchema<SqliteNativeType, any, any, any>
       | SqliteNativeType;
   };
   primaryKey?: ColumnNames | ColumnNames[];
@@ -204,19 +221,30 @@ type PrimaryKeyColumnsNames<T extends TableSchema<string>> =
 
 /*
 
-
-
 We'll want to be able to derive a Javascript type for the records a Table
 contains.
 
 */
 
-export type RecordFor<T extends TableSchema<string>> = {
-  [columnName in keyof T["columns"]]: T["columns"][columnName] extends SqliteNativeType
-    ? JsTypeForSqliteNativeType<T["columns"][columnName]>
-    : T["columns"][columnName] extends ColumnSchema<infer Type, infer Nullable>
+// The "raw" record is what is actually returned from the database, before
+// we've done any parsing.
+
+export type RawRecordFor<Table extends TableSchema<string>> = {
+  [columnName in keyof Table["columns"]]: Table["columns"][columnName] extends SqliteNativeType
+    ? JsTypeForSqliteNativeType<Table["columns"][columnName], false>
+    : Table["columns"][columnName] extends ColumnSchema<
+          infer Type,
+          any,
+          infer Nullable
+        >
       ? JsTypeForSqliteNativeType<Type, Nullable>
       : never;
+};
+
+export type RecordFor<Table extends TableSchema<string>> = {
+  [columnName in keyof Table["columns"]]: Table["columns"][columnName] extends SqliteNativeType
+    ? JsTypeForSqliteNativeType<Table["columns"][columnName], false>
+    : JsTypeForColumnSchema<Table["columns"][columnName]>;
 };
 
 /*
@@ -301,7 +329,7 @@ care about what IDs were generated.
 
 /**
  * The value returned by an insert operation, including the set of
- * autoincremented IDs that were generated.
+ * auto-incremented IDs that were generated.
  */
 type InsertResultWithIds = {
   /**
@@ -742,6 +770,9 @@ export class SqliteDatastore<TSchema extends Schema> {
         : (tableNameOrOptions as O);
 
     const tableName = String(options.table);
+    const tableSchema = this.#schema["tables"][
+      tableName
+    ] as TSchema["tables"][TableName];
 
     const sql = [`SELECT * FROM "${tableName}"`];
     const params: unknown[] = [];
@@ -768,7 +799,12 @@ export class SqliteDatastore<TSchema extends Schema> {
                 statement.finalize(() => reject(err));
                 return;
               }
-              rows.push(row as ResultRecord);
+              rows.push(
+                this.parseRow(
+                  tableSchema,
+                  row as RawRecordFor<TSchema["tables"][TableName]>,
+                ),
+              );
             },
             () => {
               statement.finalize((err) => {
@@ -900,23 +936,24 @@ export class SqliteDatastore<TSchema extends Schema> {
   }
 
   protected executeSql(sql: string, ...params: unknown[]): Promise<void> {
-    return this.prepare(sql).then(
-      (statement) =>
-        new Promise((resolve, reject) => {
-          statement.run(params, function (err) {
+    return this.prepare(sql).then((statement) =>
+      new Promise<void>((resolve, reject) => {
+        statement.run(params, function (err) {
+          if (err) {
+            reject(err);
+            return;
+          }
+          statement.finalize((err) => {
             if (err) {
               reject(err);
               return;
             }
-            statement.finalize((err) => {
-              if (err) {
-                reject(err);
-                return;
-              }
-              resolve();
-            });
+            resolve();
           });
-        }),
+        });
+      }).catch((err) => {
+        return Promise.reject(err);
+      }),
     );
   }
 
@@ -937,6 +974,31 @@ export class SqliteDatastore<TSchema extends Schema> {
 
       return db;
     });
+  }
+
+  protected parseRow<Table extends TableSchema<string>>(
+    tableSchema: Table,
+    row: RawRecordFor<Table>,
+  ): RecordFor<Table> {
+    const parsedRow = {} as RecordFor<Table>;
+
+    for (const [columnName, columnValue] of Object.entries(row)) {
+      const columnSchema =
+        tableSchema.columns[columnName as keyof typeof tableSchema.columns];
+
+      if (
+        typeof columnSchema === "object" &&
+        "parse" in columnSchema &&
+        typeof columnSchema.parse === "function"
+      ) {
+        parsedRow[columnName as keyof typeof parsedRow] =
+          columnSchema.parse(columnValue);
+      } else {
+        parsedRow[columnName as keyof typeof parsedRow] = columnValue;
+      }
+    }
+
+    return parsedRow;
   }
 
   protected prepare(sql: string, params?: unknown[]): Promise<Statement> {

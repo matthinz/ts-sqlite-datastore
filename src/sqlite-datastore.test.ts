@@ -29,8 +29,6 @@ const TEST_SCHEMA = {
   },
 } satisfies Schema;
 
-type t = InsertRecordFor<(typeof TEST_SCHEMA)["tables"]["people"]>;
-
 describe("SqliteDatastore", () => {
   describe("constructor", () => {
     it(
@@ -56,7 +54,7 @@ describe("SqliteDatastore", () => {
       }
     });
 
-    describe("with autoincrement column that is not primary key", () => {
+    describe("with auto-increment column that is not primary key", () => {
       const SCHEMA = {
         tables: {
           people: {
@@ -266,6 +264,90 @@ describe("SqliteDatastore", () => {
           expect(records).toEqual([
             { id: 1, name: "foo", birthdate: null },
             { id: 2, name: "bar", birthdate: null },
+          ]);
+        }),
+      );
+    });
+
+    describe("with custom parser on column", () => {
+      const SCHEMA = {
+        tables: {
+          events: {
+            columns: {
+              id: {
+                type: "INTEGER",
+                autoIncrement: true,
+              },
+              name: "TEXT",
+              date: {
+                type: "TEXT",
+                nullable: false,
+                parse: (value) => new Date(value as string),
+              },
+            },
+            primaryKey: "id",
+          },
+        },
+      } satisfies Schema;
+
+      it(
+        "parses the value",
+        testWithSchema(SCHEMA, async (dataStore, db) => {
+          await dataStore.insert("events", {
+            name: "Birthday party",
+            date: "2021-02-03 12:13:14",
+          });
+
+          const actual = await dataStore.select("events");
+
+          expect(actual).toEqual([
+            {
+              id: 1,
+              name: "Birthday party",
+              date: new Date("2021-02-03 12:13:14"),
+            },
+          ]);
+        }),
+      );
+    });
+
+    describe("with custom parser on nullable column", () => {
+      const SCHEMA = {
+        tables: {
+          events: {
+            columns: {
+              id: {
+                type: "INTEGER",
+                autoIncrement: true,
+              },
+              name: "TEXT",
+              date: {
+                type: "TEXT",
+                nullable: true,
+                parse: (value) =>
+                  value == null ? null : new Date(value as string),
+              },
+            },
+            primaryKey: "id",
+          },
+        },
+      } satisfies Schema;
+
+      it(
+        "parses the value",
+        testWithSchema(SCHEMA, async (dataStore, db) => {
+          await dataStore.insert("events", {
+            name: "Date night",
+          });
+
+          const actual = await dataStore.select("events");
+
+          expect(actual).toEqual([
+            {
+              id: 1,
+              name: "Date night",
+              date: null,
+            },
           ]);
         }),
       );
