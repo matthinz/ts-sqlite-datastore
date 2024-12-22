@@ -11,7 +11,11 @@ test: build
 		yarn test -t $(FILTER); \
 	fi
 
-dist: $(SOURCES)
+dist: node_modules $(SOURCES)
 	yarn build
+	touch $@
+
+node_modules: package.json yarn.lock
+	yarn install
 	touch $@
 
