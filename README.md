@@ -1,13 +1,19 @@
 # ts-sqlite-datastore
 
+Version: 0.0.1
+
+This is a single file, Promise-oriented API for working with a local sqlite
+database in Node.js. The idea is that you copy sqlite-datastore.ts into your
+project.
+
 ## Column types
 
 sqlite represents data using four types:
 
-- TEXT
-- BLOB
-- INTEGER
-- REAL
+- `TEXT`
+- `BLOB`
+- `INTEGER`
+- `REAL`
 
 These four map *somewhat* cleanly onto Javascript types. Values can also be
 NULL, but we're going to disregard that for now.
@@ -65,4 +71,3 @@ care about what IDs were generated.
 ### Error classes
 
 We'll wrap errors thrown by the sqlite driver with these classes.
-

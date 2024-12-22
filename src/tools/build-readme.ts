@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import ts from "typescript";
 
 type Comment = {
@@ -6,30 +7,51 @@ type Comment = {
   end: number;
 };
 
+const SUBSTITUTIONS = [
+  {
+    find: /Version: \d+\.\d+\.\d+/g,
+    replaceWith: ({ version }: any) => `Version: ${version}`,
+  },
+];
+
 run(process.argv.slice(2)).catch((err) => {
   console.error(err);
   process.exit(1);
 });
 
 async function run(args: string[]) {
-  const promises = args.map(async (file) => {
-    const sourceText = ts.sys.readFile(file) || "";
-    const comments: Comment[] = [];
-    const sourceFile = ts.createSourceFile(
-      file,
-      sourceText,
-      ts.ScriptTarget.Latest,
-    );
+  if (args.length === 0) {
+    throw new Error("Must specify at least one file on the command line");
+  }
 
-    collectComments(sourceFile, sourceText, comments);
+  const promises = args.map(processFile);
 
-    comments
-      .filter((c) => !c.text.startsWith("/**") && c.text.startsWith("/*"))
-      .map((c) => c.text.substring(2, c.text.length - 2).trim())
-      .forEach((c) => console.log(`${c}\n`));
+  await Promise.all(promises).then((outputs) => {
+    console.log(outputs.join("\n"));
   });
+}
 
-  await Promise.all(promises);
+async function processFile(file: string): Promise<string> {
+  const sourceText = ts.sys.readFile(file) || "";
+  const comments: Comment[] = [];
+  const sourceFile = ts.createSourceFile(
+    file,
+    sourceText,
+    ts.ScriptTarget.Latest,
+  );
+
+  collectComments(sourceFile, sourceText, comments);
+
+  const markdown = comments
+    .filter((c) => !c.text.startsWith("/**") && c.text.startsWith("/*"))
+    .map((c) => c.text.substring(2, c.text.length - 2).trim())
+    .join("\n\n");
+
+  const packageJSON = JSON.parse(await fs.readFile("package.json", "utf-8"));
+
+  return SUBSTITUTIONS.reduce<string>((result, { find, replaceWith }) => {
+    return result.replace(find, replaceWith(packageJSON));
+  }, markdown);
 }
 
 function collectComments(

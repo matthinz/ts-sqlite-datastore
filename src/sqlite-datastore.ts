@@ -4,6 +4,12 @@ import { Database, Statement } from "sqlite3";
 
 # ts-sqlite-datastore
 
+Version: 0.0.1
+
+This is a single file, Promise-oriented API for working with a local sqlite
+database in Node.js. The idea is that you copy sqlite-datastore.ts into your
+project.
+
 */
 
 /*
@@ -12,10 +18,10 @@ import { Database, Statement } from "sqlite3";
 
 sqlite represents data using four types:
 
-- TEXT
-- BLOB
-- INTEGER
-- REAL
+- `TEXT`
+- `BLOB`
+- `INTEGER`
+- `REAL`
 
 */
 
