@@ -5,7 +5,11 @@ SOURCES := $(shell find src -name '*.ts')
 build: dist
 
 test: build
-	yarn test
+	@if [ "$(FILTER)" = "" ]; then \
+		yarn test; \
+	else \
+		yarn test -t $(FILTER); \
+	fi
 
 dist: $(SOURCES)
 	yarn build
