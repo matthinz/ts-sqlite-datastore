@@ -102,7 +102,6 @@ The `SqliteDatastore` constructor an options object with the following propertie
 | -- | -- | -- |
 | `schema` | `Schema` | The schema for the database (required). |
 | `filename` | `string` | The name of the sqlite database file to open. If not provided, an in-memory database will be used. |
-| `onDatabaseReady` | `Function` | A hook to allow the caller to obtain the underlying Database instance we are working with. (This is intended for internal use only.) |
 
 ## Inserting records
 

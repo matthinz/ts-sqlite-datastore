@@ -333,7 +333,6 @@ The `SqliteDatastore` constructor an options object with the following propertie
 | -- | -- | -- |
 | `schema` | `Schema` | The schema for the database (required). |
 | `filename` | `string` | The name of the sqlite database file to open. If not provided, an in-memory database will be used. |
-| `onDatabaseReady` | `Function` | A hook to allow the caller to obtain the underlying Database instance we are working with. (This is intended for internal use only.) |
 
 */
 
@@ -345,16 +344,6 @@ export type SqliteDatastoreOptions<TSchema extends Schema> = {
    * If not provided, an in-memory database will be used.
    */
   filename?: string;
-
-  /**
-   * A hook to allow the caller to obtain the Database instance we are working with.
-   * @param err
-   * @param db
-   */
-  onDatabaseReady?: {
-    (err: Error, db: void): void;
-    (err: null, db: Database): void;
-  };
 };
 
 /*
@@ -590,31 +579,27 @@ export class SqliteDatastore<TSchema extends Schema> {
   readonly #databasePromise: Promise<Database>;
   #migrated: boolean = false;
 
-  constructor({
-    schema,
-    filename,
-    onDatabaseReady,
-  }: SqliteDatastoreOptions<TSchema>) {
+  constructor({ schema, filename, ...rest }: SqliteDatastoreOptions<TSchema>) {
     this.#filename = filename ?? ":memory:";
     this.#schema = schema;
     this.#databasePromise = new Promise((resolve, reject) => {
       const db = new Database(this.#filename, (err) => {
-        onDatabaseReady = onDatabaseReady ?? (() => {});
+        const onDatabaseReady = (err: Error | null, db?: Database) => {
+          if (
+            "onDatabaseReady" in rest &&
+            typeof rest.onDatabaseReady === "function"
+          ) {
+            rest.onDatabaseReady(err, db);
+          }
+        };
 
         if (err) {
-          setImmediate(
-            onDatabaseReady as (err: Error | null, db?: Database) => void,
-            err,
-          );
+          setImmediate(onDatabaseReady, err);
           reject(err);
           return;
         }
 
-        setImmediate(
-          onDatabaseReady as (err: Error | null, db?: Database) => void,
-          null,
-          db,
-        );
+        setImmediate(onDatabaseReady, null, db);
         resolve(db);
       });
     });

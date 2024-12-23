@@ -27,14 +27,14 @@ export function createDataStore<TSchema extends Schema>(
   return new Promise((resolve, reject) => {
     const dataStore = new SqliteDatastore({
       ...options,
-      onDatabaseReady(err, db) {
+      onDatabaseReady(err: unknown, db?: Database) {
         if (err) {
           reject(err);
           return;
         }
         resolve([dataStore, db!]);
       },
-    });
+    } as SqliteDatastoreOptions<TSchema>);
   });
 }
 
