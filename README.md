@@ -122,6 +122,32 @@ care about what IDs were generated.
 
 ## Counting records
 
+## Deleting records
+
+To delete records, you can use the `delete` method.
+
+To delete all records in a table, you must specify `{ all: true }`:
+
+```ts
+await dataStore.delete("people", { all: true });
+```
+
+To delete only some records, you can specify a `where` clause:
+
+```ts
+await dataStore.delete("people", {
+  where: {
+    name: "Joey Joe-Joe Junior Shabadoo",
+  },
+});
+
+`delete` returns a structure describing how the delete went:
+
+```ts
+const result = await dataStore.delete("people", { all: true });
+console.log("%d record(s) were deleted", result.count);
+```
+
 ## Handling errors
 
 SqliteDatastore wraps underlying sqlite errors in its own error types:

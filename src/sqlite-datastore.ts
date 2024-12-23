@@ -494,6 +494,52 @@ export type CountOptions<
 
 /*
 
+## Deleting records
+
+To delete records, you can use the `delete` method.
+
+To delete all records in a table, you must specify `{ all: true }`:
+
+```ts
+await dataStore.delete("people", { all: true });
+```
+
+To delete only some records, you can specify a `where` clause:
+
+```ts
+await dataStore.delete("people", {
+  where: {
+    name: "Joey Joe-Joe Junior Shabadoo",
+  },
+});
+
+`delete` returns a structure describing how the delete went:
+
+```ts
+const result = await dataStore.delete("people", { all: true });
+console.log("%d record(s) were deleted", result.count);
+```
+
+*/
+
+export type DeleteResult = {
+  readonly count: number;
+};
+
+export type DeleteOptions<
+  TSchema extends Schema,
+  TableName extends TableNames<TSchema>,
+> = {
+  table: TableName;
+} & (
+  | { where?: Criteria<TSchema["tables"][TableName]> }
+  | {
+      all: true;
+    }
+);
+
+/*
+
 ## Handling errors
 
 SqliteDatastore wraps underlying sqlite errors in its own error types:
@@ -688,6 +734,47 @@ export class SqliteDatastore<TSchema extends Schema> {
               }
               resolve(Number((row as any)["COUNT(*)"]));
             });
+          });
+        }),
+    );
+  }
+
+  delete<TableName extends TableNames<TSchema>>(
+    tableName: TableName,
+    options: Omit<DeleteOptions<TSchema, TableName>, "table">,
+  ): Promise<DeleteResult>;
+  delete<TableName extends TableNames<TSchema>>(
+    tableNameOrOptions: TableName | DeleteOptions<TSchema, TableName>,
+    mayBeOptions: Omit<DeleteOptions<TSchema, TableName>, "table">,
+  ): Promise<DeleteResult> {
+    const options =
+      typeof tableNameOrOptions === "string"
+        ? { ...mayBeOptions, table: tableNameOrOptions }
+        : (tableNameOrOptions as DeleteOptions<TSchema, TableName>);
+
+    const tableName = String(options.table);
+    const sql = [`DELETE FROM "${tableName}"`];
+    const params: unknown[] = [];
+
+    const [whereClause, whereParams] =
+      "where" in options
+        ? this.buildWhereClause(options.where)
+        : [undefined, []];
+    if (whereClause) {
+      sql.push(whereClause);
+      params.push(...whereParams);
+    }
+
+    return this.migrateIfNeeded().then(
+      (db) =>
+        new Promise<DeleteResult>((resolve, reject) => {
+          db.run(sql.join(" "), params, function (err) {
+            if (err) {
+              reject(err);
+              return;
+            }
+
+            resolve({ count: this.changes });
           });
         }),
     );
