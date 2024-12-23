@@ -1,5 +1,5 @@
-import { Schema } from "./sqlite-datastore";
-import { testWithSchema } from "./test-utils";
+import { NoSuchTableError, Schema } from "./sqlite-datastore";
+import { runSql, testWithSchema } from "./test-utils";
 
 const TEST_SCHEMA = {
   tables: {
@@ -154,6 +154,20 @@ describe("#select", () => {
             date: null,
           },
         ]);
+      }),
+    );
+  });
+
+  describe("when query fails", () => {
+    it(
+      "throws an appropriate error",
+      testWithSchema(TEST_SCHEMA, async (dataStore, db) => {
+        await dataStore.migrate();
+        await runSql(db, "DROP TABLE people");
+
+        expect(dataStore.select("people")).rejects.toThrow(
+          new NoSuchTableError("people"),
+        );
       }),
     );
   });

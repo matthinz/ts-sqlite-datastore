@@ -131,6 +131,8 @@ SqliteDatastore wraps underlying sqlite errors in its own error types:
 | -- | -- | -- |
 | `InsertError` | `INSERT_ERROR` | An error occurred while inserting a record. |
 | `InvalidSchemaError` | `INVALID_SCHEMA` | The schema provided to the datastore is invalid. |
+| `NoSuchTableError` | `NO_SUCH_TABLE` | The table does not exist. |
 | `UniqueConstraintViolationError` | `UNIQUE_CONSTRAINT_VIOLATION` | A unique constraint was violated. |
+| `UnknownError` | `UNKNOWN_ERROR` | An unknown error occurred (see the error message for details). |
 
 The base class for these errors is `SqliteDatastoreError`.

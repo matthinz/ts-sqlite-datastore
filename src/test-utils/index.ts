@@ -38,6 +38,22 @@ export function createDataStore<TSchema extends Schema>(
   });
 }
 
+export function runSql(
+  db: Database,
+  sql: string,
+  ...params: unknown[]
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function (err) {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
 export function testWithSchema<TSchema extends Schema>(
   schema: TSchema,
   test: (dataStore: SqliteDatastore<TSchema>, db: Database) => Promise<void>,

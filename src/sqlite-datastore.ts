@@ -513,7 +513,9 @@ SqliteDatastore wraps underlying sqlite errors in its own error types:
 | -- | -- | -- |
 | `InsertError` | `INSERT_ERROR` | An error occurred while inserting a record. |
 | `InvalidSchemaError` | `INVALID_SCHEMA` | The schema provided to the datastore is invalid. |
+| `NoSuchTableError` | `NO_SUCH_TABLE` | The table does not exist. |
 | `UniqueConstraintViolationError` | `UNIQUE_CONSTRAINT_VIOLATION` | A unique constraint was violated. |
+| `UnknownError` | `UNKNOWN_ERROR` | An unknown error occurred (see the error message for details). |
 
 The base class for these errors is `SqliteDatastoreError`.
 
@@ -522,7 +524,9 @@ The base class for these errors is `SqliteDatastoreError`.
 const ERROR_CODES = [
   "INSERT_ERROR",
   "INVALID_SCHEMA",
+  "NO_SUCH_TABLE",
   "UNIQUE_CONSTRAINT_VIOLATION",
+  "UNKNOWN_ERROR",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -556,6 +560,12 @@ export class InvalidSchemaError extends SqliteDatastoreError {
   }
 }
 
+export class NoSuchTableError extends SqliteDatastoreError {
+  constructor(public readonly tableName: string) {
+    super(`No such table: ${tableName}`, "NO_SUCH_TABLE");
+  }
+}
+
 export class UniqueConstraintViolationError extends SqliteDatastoreError {
   constructor(
     public readonly tableName: string,
@@ -565,6 +575,12 @@ export class UniqueConstraintViolationError extends SqliteDatastoreError {
       `UNIQUE constraint violation: "${tableName}"."${columnName}"`,
       "UNIQUE_CONSTRAINT_VIOLATION",
     );
+  }
+}
+
+export class UnknownError extends SqliteDatastoreError {
+  constructor(message: string) {
+    super(message, "UNKNOWN_ERROR");
   }
 }
 
@@ -864,35 +880,39 @@ export class SqliteDatastore<TSchema extends Schema> {
     return Promise.all([
       this.migrateIfNeeded(),
       this.prepare(sql.join(" "), params),
-    ]).then(
-      ([_, statement]) =>
-        new Promise((resolve, reject) => {
-          const rows = [] as ResultRecord[];
-          statement.each(
-            (err, row) => {
-              if (err) {
-                statement.finalize(() => reject(err));
-                return;
-              }
-              rows.push(
-                this.parseRow(
-                  tableSchema,
-                  row as RawRecordFor<TSchema["tables"][TableName]>,
-                ),
+    ])
+      .then(
+        ([_, statement]) =>
+          new Promise<RecordFor<TSchema["tables"][TableName]>[]>(
+            (resolve, reject) => {
+              const rows = [] as ResultRecord[];
+              statement.each(
+                (err, row) => {
+                  if (err) {
+                    statement.finalize(() => reject(err));
+                    return;
+                  }
+                  rows.push(
+                    this.parseRow(
+                      tableSchema,
+                      row as RawRecordFor<TSchema["tables"][TableName]>,
+                    ),
+                  );
+                },
+                (err) => {
+                  statement.finalize((_finalizeErr) => {
+                    if (err) {
+                      reject(err);
+                      return;
+                    }
+                    resolve(rows);
+                  });
+                },
               );
             },
-            () => {
-              statement.finalize((err) => {
-                if (err) {
-                  reject(err);
-                  return;
-                }
-                resolve(rows);
-              });
-            },
-          );
-        }),
-    );
+          ),
+      )
+      .catch((err) => Promise.reject(this.adaptSqliteError(err)));
   }
 
   protected adaptSqliteError(err: Error): Error {
@@ -900,9 +920,19 @@ export class SqliteDatastore<TSchema extends Schema> {
       return err;
     }
 
+    let m: RegExpExecArray | null;
+
     switch (err.errno) {
+      case 1:
+        m = /SQLITE_ERROR: no such table: (.*)/.exec(err.message);
+        if (m) {
+          return new NoSuchTableError(m[1]);
+        }
+
+        return new UnknownError(err.message);
+
       case 19:
-        const m = err.message.match(/UNIQUE constraint failed: (.*)\.(.*)/);
+        m = /UNIQUE constraint failed: (.*)\.(.*)/.exec(err.message);
         if (m) {
           return new UniqueConstraintViolationError(m[1], m[2]);
         }
