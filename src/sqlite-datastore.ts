@@ -513,12 +513,17 @@ SqliteDatastore wraps underlying sqlite errors in its own error types:
 | -- | -- | -- |
 | `InsertError` | `INSERT_ERROR` | An error occurred while inserting a record. |
 | `InvalidSchemaError` | `INVALID_SCHEMA` | The schema provided to the datastore is invalid. |
+| `UniqueConstraintViolationError` | `UNIQUE_CONSTRAINT_VIOLATION` | A unique constraint was violated. |
 
 The base class for these errors is `SqliteDatastoreError`.
 
 */
 
-const ERROR_CODES = ["INSERT_ERROR", "INVALID_SCHEMA"] as const;
+const ERROR_CODES = [
+  "INSERT_ERROR",
+  "INVALID_SCHEMA",
+  "UNIQUE_CONSTRAINT_VIOLATION",
+] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
 
@@ -548,6 +553,18 @@ export class InsertError extends SqliteDatastoreError {
 export class InvalidSchemaError extends SqliteDatastoreError {
   constructor(message: string) {
     super(message, "INVALID_SCHEMA");
+  }
+}
+
+export class UniqueConstraintViolationError extends SqliteDatastoreError {
+  constructor(
+    public readonly tableName: string,
+    public readonly columnName: string,
+  ) {
+    super(
+      `UNIQUE constraint violation: "${tableName}"."${columnName}"`,
+      "UNIQUE_CONSTRAINT_VIOLATION",
+    );
   }
 }
 
@@ -791,6 +808,12 @@ export class SqliteDatastore<TSchema extends Schema> {
               resolve(result);
             });
           }),
+        (err) =>
+          new Promise((_resolve, reject) => {
+            statement.finalize(() => {
+              reject(this.adaptSqliteError(err));
+            });
+          }),
       );
   }
 
@@ -870,6 +893,23 @@ export class SqliteDatastore<TSchema extends Schema> {
           );
         }),
     );
+  }
+
+  protected adaptSqliteError(err: Error): Error {
+    if (!("errno" in err)) {
+      return err;
+    }
+
+    switch (err.errno) {
+      case 19:
+        const m = err.message.match(/UNIQUE constraint failed: (.*)\.(.*)/);
+        if (m) {
+          return new UniqueConstraintViolationError(m[1], m[2]);
+        }
+        break;
+    }
+
+    return err;
   }
 
   protected buildWhereClause<Table extends TableSchema<string>>(

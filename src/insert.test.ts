@@ -1,4 +1,9 @@
-import { InsertError, InsertRecordFor, Schema } from "./sqlite-datastore";
+import {
+  InsertError,
+  InsertRecordFor,
+  Schema,
+  UniqueConstraintViolationError,
+} from "./sqlite-datastore";
 import { all, testWithSchema } from "./test-utils";
 
 const TEST_SCHEMA = {
@@ -121,6 +126,34 @@ describe("#insert", () => {
             date: "2021-02-03T12:13:14.000Z",
           },
         ]);
+      }),
+    );
+  });
+
+  describe("violating uniqueness constraint", () => {
+    const SCHEMA = {
+      tables: {
+        people: {
+          columns: {
+            id: {
+              type: "INTEGER",
+              autoIncrement: true,
+            },
+            name: { type: "TEXT", unique: true },
+          },
+          primaryKey: "id",
+        },
+      },
+    } satisfies Schema;
+
+    it(
+      "throws an Error",
+      testWithSchema(SCHEMA, async (dataStore) => {
+        await dataStore.insert("people", { name: "foo" });
+
+        await expect(
+          dataStore.insert("people", { name: "foo" }),
+        ).rejects.toThrow(new UniqueConstraintViolationError("people", "name"));
       }),
     );
   });
