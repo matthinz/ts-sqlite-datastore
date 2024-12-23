@@ -21,8 +21,8 @@ The `JsTypeForSqliteNativeType` helper allows us to convert between sqlite types
 and Javascript types, e.g.:
 
 ```ts
-type T = JsTypeForSqliteNativeType<"TEXT", false); // string
-type NullableT = JsTypeForSqliteNativeType<"TEXT", true); // string | null
+type T = JsTypeForSqliteNativeType<"TEXT", false>; // string
+type NullableT = JsTypeForSqliteNativeType<"TEXT", true>; // string | null
 ```
 
 ## Schemas
