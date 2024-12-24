@@ -494,6 +494,36 @@ export type CountOptions<
 
 /*
 
+## Updating records
+
+We support batch updating records based on a WHERE clause.
+
+```ts
+await dataStore.update("people", {
+  set: {
+    birthdate: "1999-01-01",
+  }
+  where: { birthdate: null }
+);
+```
+
+*/
+
+type UpdateResult = {
+  count: number;
+};
+
+export type UpdateOptions<
+  TSchema extends Schema,
+  TableName extends TableNames<TSchema>,
+> = {
+  table: TableName;
+  set: Partial<RecordFor<TSchema["tables"][TableName]>>;
+  where?: Criteria<TSchema["tables"][TableName]>;
+};
+
+/*
+
 ## Deleting records
 
 To delete records, you can use the `delete` method.
@@ -549,6 +579,7 @@ SqliteDatastore wraps underlying sqlite errors in its own error types:
 | `InsertError` | `INSERT_ERROR` | An error occurred while inserting a record. |
 | `InvalidSchemaError` | `INVALID_SCHEMA` | The schema provided to the datastore is invalid. |
 | `NoSuchTableError` | `NO_SUCH_TABLE` | The table does not exist. |
+| `SyntaxError` | `SYNTAX_ERROR` | A syntax error occurred. |
 | `UniqueConstraintViolationError` | `UNIQUE_CONSTRAINT_VIOLATION` | A unique constraint was violated. |
 | `UnknownError` | `UNKNOWN_ERROR` | An unknown error occurred (see the error message for details). |
 
@@ -560,6 +591,7 @@ const ERROR_CODES = [
   "INSERT_ERROR",
   "INVALID_SCHEMA",
   "NO_SUCH_TABLE",
+  "SYNTAX_ERROR",
   "UNIQUE_CONSTRAINT_VIOLATION",
   "UNKNOWN_ERROR",
 ] as const;
@@ -598,6 +630,18 @@ export class InvalidSchemaError extends SqliteDatastoreError {
 export class NoSuchTableError extends SqliteDatastoreError {
   constructor(public readonly tableName: string) {
     super(`No such table: ${tableName}`, "NO_SUCH_TABLE");
+  }
+}
+
+export class SyntaxError extends SqliteDatastoreError {
+  constructor(
+    message: string,
+    public readonly sql?: string,
+  ) {
+    if (sql != null) {
+      message = `${message} (SQL: ${sql})`;
+    }
+    super(message, "SYNTAX_ERROR");
   }
 }
 
@@ -899,7 +943,7 @@ export class SqliteDatastore<TSchema extends Schema> {
         (err) =>
           new Promise((_resolve, reject) => {
             statement.finalize(() => {
-              reject(this.adaptSqliteError(err));
+              reject(this.adaptSqliteError(err, sql));
             });
           }),
       );
@@ -937,22 +981,21 @@ export class SqliteDatastore<TSchema extends Schema> {
       tableName
     ] as TSchema["tables"][TableName];
 
-    const sql = [`SELECT * FROM "${tableName}"`];
+    const sqlClauses = [`SELECT * FROM "${tableName}"`];
     const params: unknown[] = [];
 
     const [whereClause, whereParams] = this.buildWhereClause(options.where);
 
     if (whereClause) {
-      sql.push(whereClause);
+      sqlClauses.push(whereClause);
       params.push(...whereParams);
     }
 
+    const sql = sqlClauses.join(" ");
+
     type ResultRecord = RecordFor<TSchema["tables"][TableName]>;
 
-    return Promise.all([
-      this.migrateIfNeeded(),
-      this.prepare(sql.join(" "), params),
-    ])
+    return Promise.all([this.migrateIfNeeded(), this.prepare(sql, params)])
       .then(
         ([_, statement]) =>
           new Promise<RecordFor<TSchema["tables"][TableName]>[]>(
@@ -984,10 +1027,10 @@ export class SqliteDatastore<TSchema extends Schema> {
             },
           ),
       )
-      .catch((err) => Promise.reject(this.adaptSqliteError(err)));
+      .catch((err) => Promise.reject(this.adaptSqliteError(err, sql)));
   }
 
-  protected adaptSqliteError(err: Error): Error {
+  protected adaptSqliteError(err: Error, sql?: string): Error {
     if (!("errno" in err)) {
       return err;
     }
@@ -1001,6 +1044,11 @@ export class SqliteDatastore<TSchema extends Schema> {
           return new NoSuchTableError(m[1]);
         }
 
+        m = /SQLITE_ERROR: near .*: syntax error/.exec(err.message);
+        if (m) {
+          return new SyntaxError(err.message, sql);
+        }
+
         return new UnknownError(err.message);
 
       case 19:
@@ -1012,6 +1060,79 @@ export class SqliteDatastore<TSchema extends Schema> {
     }
 
     return err;
+  }
+
+  update<TableName extends TableNames<TSchema>>(
+    tableName: TableName,
+    records: RecordFor<TSchema["tables"][TableName]>[],
+  ): Promise<UpdateResult>;
+  update<TableName extends TableNames<TSchema>>(
+    tableName: TableName,
+    options: Omit<UpdateOptions<TSchema, TableName>, "table">,
+  ): Promise<UpdateResult>;
+  update<TableName extends TableNames<TSchema>>(
+    options: UpdateOptions<TSchema, TableName>,
+  ): Promise<UpdateResult>;
+  update<TableName extends TableNames<TSchema>>(
+    optionsOrTableName: UpdateOptions<TSchema, TableName> | TableName,
+    maybeOptionsOrRecords?:
+      | Omit<UpdateOptions<TSchema, TableName>, "table">
+      | RecordFor<TSchema["tables"][TableName]>[],
+  ): Promise<UpdateResult> {
+    const options =
+      typeof optionsOrTableName === "string"
+        ? Array.isArray(maybeOptionsOrRecords)
+          ? { records: maybeOptionsOrRecords, table: optionsOrTableName }
+          : { ...maybeOptionsOrRecords, table: optionsOrTableName }
+        : (optionsOrTableName as UpdateOptions<TSchema, TableName>);
+
+    const tableName = String(options.table);
+
+    if ("records" in options) {
+      throw new Error("Not implemented");
+    }
+
+    const set = "set" in options ? options.set : undefined;
+
+    if (!set) {
+      throw new Error();
+    }
+
+    const sqlClauses = [`UPDATE "${tableName}" SET `];
+    const params: unknown[] = [];
+
+    Object.keys(set).forEach((columnName) => {
+      if (sqlClauses.length > 1) {
+        sqlClauses.push(", ");
+      }
+      sqlClauses.push(`"${columnName}" = ?`);
+      params.push(set[columnName]);
+    });
+
+    const [whereClause, whereParams] =
+      "where" in options
+        ? this.buildWhereClause(options.where)
+        : [undefined, []];
+
+    if (whereClause) {
+      sqlClauses.push(whereClause);
+      params.push(...whereParams);
+    }
+
+    const sql = sqlClauses.join("");
+
+    return this.migrateIfNeeded().then((db) =>
+      new Promise<UpdateResult>((resolve, reject) => {
+        db.run(sql, params, function (err) {
+          if (err) {
+            reject(err);
+            return;
+          }
+
+          resolve({ count: this.changes });
+        });
+      }).catch((err) => Promise.reject(this.adaptSqliteError(err, sql))),
+    );
   }
 
   protected buildWhereClause<Table extends TableSchema<string>>(

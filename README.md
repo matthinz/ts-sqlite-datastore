@@ -122,6 +122,19 @@ care about what IDs were generated.
 
 ## Counting records
 
+## Updating records
+
+We support batch updating records based on a WHERE clause.
+
+```ts
+await dataStore.update("people", {
+  set: {
+    birthdate: "1999-01-01",
+  }
+  where: { birthdate: null }
+);
+```
+
 ## Deleting records
 
 To delete records, you can use the `delete` method.
@@ -157,6 +170,7 @@ SqliteDatastore wraps underlying sqlite errors in its own error types:
 | `InsertError` | `INSERT_ERROR` | An error occurred while inserting a record. |
 | `InvalidSchemaError` | `INVALID_SCHEMA` | The schema provided to the datastore is invalid. |
 | `NoSuchTableError` | `NO_SUCH_TABLE` | The table does not exist. |
+| `SyntaxError` | `SYNTAX_ERROR` | A syntax error occurred. |
 | `UniqueConstraintViolationError` | `UNIQUE_CONSTRAINT_VIOLATION` | A unique constraint was violated. |
 | `UnknownError` | `UNKNOWN_ERROR` | An unknown error occurred (see the error message for details). |
 
