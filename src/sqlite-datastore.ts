@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { Database, Statement } from "sqlite3";
 
 /*
@@ -28,11 +29,12 @@ sqlite represents data using four types:
  * `SqliteNativeType` is one of the four native types supported by sqlite.
  */
 export type SqliteNativeType = "TEXT" | "BLOB" | "INTEGER" | "REAL";
-
 /*
 
-These four map *somewhat* cleanly onto Javascript types. Values can also be
-NULL, but we're going to disregard that for now.
+These four map *somewhat* cleanly onto Javascript types.
+
+Of course, values can also be `NULL`, which Javascript helpfully represents in
+two ways: `null` and `undefined`.
 
 The `JsTypeForSqliteNativeType` helper allows us to convert between sqlite types
 and Javascript types, e.g.:
@@ -65,6 +67,114 @@ export type JsTypeForSqliteNativeType<
         ? number | bigint
         : T extends "REAL"
           ? number
+          : never;
+
+/*
+
+### Custom types
+
+For convenience, we also allow certain special "custom" types.
+
+| Type | Description |
+| -- | -- |
+| "uuid" | A universally-unique identifier, stored as a `TEXT` column with `UNIQUE` and `NOT NULL` constraints by default. |
+
+*/
+
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+type CustomTypeDefinition<
+  T extends SqliteNativeType,
+  JsType,
+  Nullable extends boolean,
+  Unique extends boolean,
+> = {
+  type: T;
+  nullable: Nullable;
+  serialize(value: unknown): JsTypeForSqliteNativeType<T, Nullable>;
+  parse(value: JsTypeForSqliteNativeType<T, false>): JsType;
+  unique: Unique;
+};
+
+type CustomTypeMap = {
+  [key: string]: CustomTypeDefinition<any, any, any, any>;
+};
+
+const CUSTOM_TYPES: CustomTypeMap = {
+  uuid: {
+    type: "TEXT",
+    nullable: false,
+    unique: true,
+    parse: (value) => value,
+    serialize(value: unknown) {
+      if (value == null) {
+        return crypto.randomUUID();
+      }
+
+      const valueAsString = String(value);
+
+      if (!UUID_REGEX.test(valueAsString)) {
+        throw new InvalidUUIDError();
+      }
+
+      return valueAsString;
+    },
+  },
+} as const;
+
+type CustomTypeName = keyof typeof CUSTOM_TYPES;
+
+type SqliteNativeTypeForCustomType<T extends CustomTypeName> =
+  (typeof CUSTOM_TYPES)[T]["type"];
+
+type JsTypeForCustomType<
+  T extends CustomTypeName,
+  Nullable extends boolean | undefined = undefined,
+> =
+  (typeof CUSTOM_TYPES)[T] extends CustomTypeDefinition<
+    SqliteNativeType,
+    infer JsType,
+    infer DefaultNullable,
+    any
+  >
+    ? Nullable extends boolean
+      ? Nullable extends true
+        ? JsType | null
+        : JsType
+      : DefaultNullable extends true
+        ? JsType | null
+        : JsType
+    : never;
+
+type JsTypeFor<T, Nullable = false> = Nullable extends true
+  ? T extends CustomTypeName
+    ? JsTypeForCustomType<T> | void
+    : T extends SqliteNativeType
+      ? JsTypeForSqliteNativeType<T, false> | void
+      : never
+  : T extends CustomTypeName
+    ? JsTypeForCustomType<T>
+    : T extends SqliteNativeType
+      ? JsTypeForSqliteNativeType<T, false>
+      : never;
+
+type SqliteNativeTypeFor<
+  T extends
+    | SqliteNativeType
+    | CustomTypeName
+    | AutoIncrementableColumnSchema
+    | NativeTypeColumnSchema<any, any, any, any, any>,
+> = T extends SqliteNativeType
+  ? T
+  : T extends CustomTypeName
+    ? SqliteNativeTypeForCustomType<T>
+    : T extends AutoIncrementableColumnSchema
+      ? "INTEGER"
+      : T extends NativeTypeColumnSchema<infer NativeType, any, any, any, any>
+        ? NativeType
+        : T extends CustomTypeColumnSchema<infer CustomType, any, any>
+          ? SqliteNativeTypeForCustomType<CustomType>
           : never;
 
 /*
@@ -143,79 +253,118 @@ type AutoIncrementableColumnSchema = {
   /**
    * Whether this column's value should auto-increment.
    */
-  autoIncrement: boolean;
+  autoIncrement: true;
 };
 
-export type ColumnSchema<
+type CustomTypeColumnSchema<
+  T extends CustomTypeName,
+  Nullable extends boolean | undefined = (typeof CUSTOM_TYPES)[T]["nullable"],
+  Unique extends boolean | undefined = (typeof CUSTOM_TYPES)[T]["unique"],
+> = {
+  type: T;
+
+  /**
+   * Whether this column can contain NULL values.
+   */
+  nullable?: Nullable;
+
+  /**
+   * Whether values in this column must be unique.
+   */
+  unique?: Unique;
+};
+
+type NativeTypeColumnSchema<
   T extends SqliteNativeType,
   ParsedType,
-  Nullable extends boolean | undefined,
-  DefaultValue = JsTypeForSqliteNativeType<T, true> | undefined,
-> =
+  Nullable extends boolean = false,
+  DefaultValue = JsTypeFor<T>,
+  Unique extends boolean = false,
+> = {
+  type: T;
+
+  /**
+   * Value to insert as a default.
+   */
+  defaultValue?: DefaultValue;
+
+  /**
+   * Whether this column can contain NULL values.
+   */
+  nullable?: Nullable;
+
+  /**
+   * If provided, a function used to parse data from the database into a
+   * native Javascript representation.
+   */
+  parse?: (value: JsTypeFor<T, Nullable>) => ParsedType;
+
+  /**
+   * If provided, a function used to serialize native Javascript values
+   * back to a form used by the database.
+   */
+  serialize?: (value: unknown) => JsTypeFor<T, Nullable>;
+
+  /**
+   * Whether values in this column must be unique.
+   * Defaults to `false`.
+   */
+  unique?: Unique;
+};
+
+export type ColumnSchema =
   | AutoIncrementableColumnSchema
-  | {
-      type: T;
-
-      /**
-       * Value to insert as a default.
-       */
-      defaultValue?: DefaultValue;
-
-      /**
-       * Whether this column can contain NULL values.
-       */
-      nullable?: Nullable;
-
-      /**
-       * If provided, a function used to parse data from the database into a
-       * native Javascript representation.
-       */
-      parse?: (value: JsTypeForSqliteNativeType<T, Nullable>) => ParsedType;
-
-      /**
-       * If provided, a function used to serialize native Javascript values
-       * back to a form used by the database.
-       */
-      serialize?: (value: unknown) => JsTypeForSqliteNativeType<T, Nullable>;
-
-      /**
-       * Whether values in this column must be unique.
-       * Defaults to `false`.
-       */
-      unique?: boolean;
-    };
+  | NativeTypeColumnSchema<SqliteNativeType, any, any, any>
+  | CustomTypeColumnSchema<CustomTypeName>;
 
 export type JsTypeForColumnSchema<
   ColumnSchemaType extends
     | SqliteNativeType
-    | ColumnSchema<SqliteNativeType, any, any>,
+    | CustomTypeName
+    | NativeTypeColumnSchema<SqliteNativeType, any, any, any>
+    | CustomTypeColumnSchema<CustomTypeName>,
 > = ColumnSchemaType extends SqliteNativeType
-  ? // We've been given a literal string, e.g. "TEXT"
+  ? // We've been given a literal string for a sqlite type, e.g. "TEXT"
     JsTypeForSqliteNativeType<ColumnSchemaType, false>
-  : // We've been given a ColumnSchema, e.g. { "type": "TEXT" }
-    ColumnSchemaType extends ColumnSchema<
-        infer T,
-        infer ParsedType,
-        infer Nullable
-      >
-    ? ColumnSchemaType extends {
-        type: T;
-        parse: (input: JsTypeForSqliteNativeType<T, Nullable>) => ParsedType;
-      }
-      ? // A parse function was provided, so use its return type
-        ParsedType
-      : // No parse function was provided, so use the specified type
-        Nullable extends true
-        ? // Column is nullable
-          JsTypeForSqliteNativeType<T, true>
-        : // Column is not nullable
-          JsTypeForSqliteNativeType<T, false>
-    : never;
+  : ColumnSchemaType extends CustomTypeName
+    ? // We've been given a custom type name, e.g. "uuid"
+      JsTypeForCustomType<ColumnSchemaType>
+    : ColumnSchemaType extends NativeTypeColumnSchema<
+          infer T,
+          infer ParsedType,
+          infer Nullable,
+          any
+        >
+      ? // We've been given a column schema object based on a native type, e.g. { "type": "TEXT" }
+        ColumnSchemaType extends {
+          type: T;
+          parse: (input: JsTypeForSqliteNativeType<T, Nullable>) => ParsedType;
+        }
+        ? // A parse function was provided, so use its return type
+          ParsedType
+        : // No parse function was provided, so use the specified type
+          Nullable extends true
+          ? // Column is nullable
+            JsTypeForSqliteNativeType<T, true>
+          : // Column is not nullable
+            JsTypeForSqliteNativeType<T, false>
+      : ColumnSchemaType extends CustomTypeColumnSchema<
+            infer T,
+            infer Nullable,
+            any
+          >
+        ? // We've been given a schema based on a custom type
+          JsTypeForCustomType<T, Nullable>
+        : // We've been given an invalid schema
+          never;
 
 export type TableSchema<ColumnNames extends string> = {
   columns: {
     [columnName in ColumnNames]:
-      | ColumnSchema<SqliteNativeType, any, any, any>
+      | AutoIncrementableColumnSchema
+      | NativeTypeColumnSchema<SqliteNativeType, any, any, any>
+      | CustomTypeColumnSchema<CustomTypeName, any, any>
+      | CustomTypeName
       | SqliteNativeType;
   };
   primaryKey?: ColumnNames | ColumnNames[];
@@ -229,14 +378,33 @@ export type ColumnNames<Table extends TableSchema<string>> =
  */
 type MakeOptional<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
 
+type IsNullable<
+  T extends
+    | SqliteNativeType
+    | CustomTypeName
+    | AutoIncrementableColumnSchema
+    | NativeTypeColumnSchema<any, any, any, any>
+    | CustomTypeColumnSchema<any, any, any>,
+> = T extends SqliteNativeType
+  ? false
+  : T extends CustomTypeName
+    ? (typeof CUSTOM_TYPES)[T]["nullable"]
+    : T extends AutoIncrementableColumnSchema
+      ? false
+      : T extends NativeTypeColumnSchema<infer T, any, infer Nullable, any>
+        ? Nullable
+        : T extends CustomTypeColumnSchema<infer T, infer Nullable, any>
+          ? Nullable
+          : never;
+
 type MapWhereNullableColumnsHaveColumnNameAsValue<
   T extends TableSchema<string>,
 > = {
-  [columnName in keyof T["columns"]]: T["columns"][columnName] extends SqliteNativeType
-    ? never
-    : T["columns"][columnName] extends ColumnSchema<any, any, true>
-      ? columnName
-      : never;
+  [columnName in keyof T["columns"]]: IsNullable<
+    T["columns"][columnName]
+  > extends true
+    ? columnName
+    : never;
 };
 
 /**
@@ -282,15 +450,11 @@ To derive a Javascript type for a record in a table, you can use
  * we've done any parsing.
  */
 export type RawRecordFor<Table extends TableSchema<string>> = {
-  [columnName in keyof Table["columns"]]: Table["columns"][columnName] extends SqliteNativeType
-    ? JsTypeForSqliteNativeType<Table["columns"][columnName], false>
-    : Table["columns"][columnName] extends ColumnSchema<
-          infer Type,
-          any,
-          infer Nullable
-        >
-      ? JsTypeForSqliteNativeType<Type, Nullable>
-      : never;
+  [columnName in keyof Table["columns"]]: IsNullable<
+    Table["columns"][columnName]
+  > extends true
+    ? JsTypeFor<SqliteNativeTypeFor<Table["columns"][columnName]>, true>
+    : JsTypeFor<SqliteNativeTypeFor<Table["columns"][columnName]>, false>;
 };
 
 export type RecordFor<Table extends TableSchema<string>> = {
@@ -590,6 +754,7 @@ The base class for these errors is `SqliteDatastoreError`.
 const ERROR_CODES = [
   "INSERT_ERROR",
   "INVALID_SCHEMA",
+  "INVALID_UUID",
   "NO_SUCH_TABLE",
   "SYNTAX_ERROR",
   "UNIQUE_CONSTRAINT_VIOLATION",
@@ -624,6 +789,12 @@ export class InsertError extends SqliteDatastoreError {
 export class InvalidSchemaError extends SqliteDatastoreError {
   constructor(message: string) {
     super(message, "INVALID_SCHEMA");
+  }
+}
+
+export class InvalidUUIDError extends SqliteDatastoreError {
+  constructor() {
+    super("The value provided is not a valid UUID", "INVALID_UUID");
   }
 }
 
@@ -910,6 +1081,13 @@ export class SqliteDatastore<TSchema extends Schema> {
                 typeof columnSchema.serialize === "function"
               ) {
                 return columnSchema.serialize(value);
+              }
+
+              if (
+                typeof columnSchema === "string" &&
+                columnSchema in CUSTOM_TYPES
+              ) {
+                return CUSTOM_TYPES[columnSchema].serialize(value);
               }
 
               return value;
@@ -1200,50 +1378,57 @@ export class SqliteDatastore<TSchema extends Schema> {
     }
   }
 
-  protected createTable(
+  protected createTable<Table extends TableSchema<string>>(
     tableName: string,
     tableSchema: TableSchema<string>,
   ): Promise<void> {
-    const columns = Object.entries(tableSchema.columns).map(
-      ([columnName, columnSchema]) => {
-        columnSchema =
-          typeof columnSchema === "string"
-            ? { type: columnSchema }
-            : columnSchema;
+    const columnNames: ColumnNames<Table>[] = Object.keys(tableSchema.columns);
 
-        const { type } = columnSchema;
+    const columnDefinitions = columnNames.map((columnName) => {
+      const columnNameAsString = String(columnName);
+      const rawColumnSchema = tableSchema.columns[columnNameAsString]!;
 
-        const isPrimaryKey = Array.isArray(tableSchema.primaryKey)
-          ? tableSchema.primaryKey.includes(columnName)
-          : tableSchema.primaryKey === columnName;
+      const columnSchema =
+        typeof rawColumnSchema === "string"
+          ? { type: rawColumnSchema }
+          : rawColumnSchema;
 
-        const autoIncrement =
-          "autoIncrement" in columnSchema && columnSchema.autoIncrement;
-        const nullable = "nullable" in columnSchema && !!columnSchema.nullable;
-        const unique = "unique" in columnSchema && !!columnSchema.unique;
+      if (typeof columnSchema === "number") {
+        throw new Error("TODO: Find out why this could possibly be a number");
+      }
 
-        if (autoIncrement && !isPrimaryKey) {
-          throw new InvalidSchemaError(
-            `Column '${columnName}' in table '${tableName}' is marked as auto-incrementing but is not part of the table's primary key.`,
-          );
-        }
+      const { type } = columnSchema;
 
-        return [
-          `"${columnName}"`,
-          type,
-          isPrimaryKey && "PRIMARY KEY",
-          autoIncrement && "AUTOINCREMENT",
-          nullable ? "NULL" : "NOT NULL",
-          (autoIncrement || unique) && "UNIQUE",
-        ]
-          .filter(Boolean)
-          .join(" ");
-      },
-    );
+      const isPrimaryKey = Array.isArray(tableSchema.primaryKey)
+        ? tableSchema.primaryKey.includes(String(columnName))
+        : tableSchema.primaryKey === columnName;
+
+      const autoIncrement =
+        "autoIncrement" in columnSchema && columnSchema.autoIncrement;
+      const nullable = "nullable" in columnSchema && !!columnSchema.nullable;
+      const unique = "unique" in columnSchema && !!columnSchema.unique;
+
+      if (autoIncrement && !isPrimaryKey) {
+        throw new InvalidSchemaError(
+          `Column '${columnNameAsString}' in table '${tableName}' is marked as auto-incrementing but is not part of the table's primary key.`,
+        );
+      }
+
+      return [
+        `"${columnNameAsString}"`,
+        type,
+        isPrimaryKey && "PRIMARY KEY",
+        autoIncrement && "AUTOINCREMENT",
+        nullable ? "NULL" : "NOT NULL",
+        (autoIncrement || unique) && "UNIQUE",
+      ]
+        .filter(Boolean)
+        .join(" ");
+    });
 
     const sql = [
       `CREATE TABLE IF NOT EXISTS "${tableName}" (`,
-      columns.join(", "),
+      columnDefinitions.join(", "),
       ")",
     ].join("");
 
@@ -1344,6 +1529,24 @@ export class SqliteDatastore<TSchema extends Schema> {
     // TODO: Provide an option ("unchecked"?) to allow faster inserts without
     // these pre-checks.
     const columnNameSet = new Set<keyof InsertRecordFor<Table>>();
+
+    // If a column is non-nullable, we need to _try_ to insert a value.
+    // This ensures that any custom serializers will be run even if the
+    // column is not present
+    Object.entries(tableSchema.columns).forEach(
+      ([columnName, columnSchema]) => {
+        const nullable =
+          (typeof columnSchema === "string" &&
+            columnSchema in CUSTOM_TYPES &&
+            CUSTOM_TYPES[columnSchema].nullable) ||
+          (typeof columnSchema === "object" &&
+            "nullable" in columnSchema &&
+            columnSchema.nullable);
+        if (!nullable) {
+          columnNameSet.add(columnName as keyof InsertRecordFor<Table>);
+        }
+      },
+    );
 
     for (const record of records) {
       Object.keys(record).forEach((columnName) => {

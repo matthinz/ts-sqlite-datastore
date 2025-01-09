@@ -14,8 +14,10 @@ sqlite represents data using four types:
 - `INTEGER`
 - `REAL`
 
-These four map *somewhat* cleanly onto Javascript types. Values can also be
-NULL, but we're going to disregard that for now.
+These four map *somewhat* cleanly onto Javascript types.
+
+Of course, values can also be `NULL`, which Javascript helpfully represents in
+two ways: `null` and `undefined`.
 
 The `JsTypeForSqliteNativeType` helper allows us to convert between sqlite types
 and Javascript types, e.g.:
@@ -24,6 +26,14 @@ and Javascript types, e.g.:
 type T = JsTypeForSqliteNativeType<"TEXT", false>; // string
 type NullableT = JsTypeForSqliteNativeType<"TEXT", true>; // string | null
 ```
+
+### Custom types
+
+For convenience, we also allow certain special "custom" types.
+
+| Type | Description |
+| -- | -- |
+| "uuid" | A universally-unique identifier, stored as a `TEXT` column with `UNIQUE` and `NOT NULL` constraints by default. |
 
 ## Schemas
 
