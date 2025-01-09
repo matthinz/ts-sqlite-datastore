@@ -101,6 +101,18 @@ Here's the full set of properties you can use to describe your columns:
 | `serialize`    | (Optional.) A function to serialize a Javascript value into a form suitable for the database |
 | `unique`       | Whether values in this column must be unique (defaults to `false`)          |
 
+You can specify the primary key on your table as a column name or an array of column names:
+
+```ts
+{
+  tables: {
+    users: { /* ... * / }
+    primaryKey: "id"
+}
+```
+
+If not provided, the primary key defaults to `id`.
+
 To derive a Javascript type for a record in a table, you can use
 `RecordFor<Table>`.
 

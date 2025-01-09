@@ -245,6 +245,18 @@ Here's the full set of properties you can use to describe your columns:
 | `serialize`    | (Optional.) A function to serialize a Javascript value into a form suitable for the database |
 | `unique`       | Whether values in this column must be unique (defaults to `false`)          |
 
+You can specify the primary key on your table as a column name or an array of column names:
+
+```ts
+{
+  tables: {
+    users: { /* ... * / }
+    primaryKey: "id"
+}
+```
+
+If not provided, the primary key defaults to `id`.
+
 */
 
 type AutoIncrementableColumnSchema = {
@@ -1401,7 +1413,8 @@ export class SqliteDatastore<TSchema extends Schema> {
 
       const isPrimaryKey = Array.isArray(tableSchema.primaryKey)
         ? tableSchema.primaryKey.includes(String(columnName))
-        : tableSchema.primaryKey === columnName;
+        : tableSchema.primaryKey === columnName ||
+          (String(columnName) === "id" && !("primaryKey" in tableSchema));
 
       const autoIncrement =
         "autoIncrement" in columnSchema && columnSchema.autoIncrement;

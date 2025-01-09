@@ -52,7 +52,7 @@ describe("SqliteDatastore", () => {
         tables: {
           people: {
             columns: {
-              id: {
+              foo: {
                 type: "INTEGER",
                 autoIncrement: true,
               },
@@ -69,7 +69,7 @@ describe("SqliteDatastore", () => {
 
         expect(dataStore.migrate()).rejects.toThrow(
           new InvalidSchemaError(
-            "Column 'id' in table 'people' is marked as auto-incrementing but is not part of the table's primary key.",
+            "Column 'foo' in table 'people' is marked as auto-incrementing but is not part of the table's primary key.",
           ),
         );
       });
@@ -100,5 +100,77 @@ describe("SqliteDatastore", () => {
         await dataStore.migrate();
       }),
     );
+
+    describe("when no primary key specified", () => {
+      const SCHEMA = {
+        tables: {
+          users: {
+            columns: {
+              id: "INTEGER",
+              name: "TEXT",
+            },
+          },
+        },
+      } satisfies Schema;
+
+      it(
+        "uses id by default",
+        testWithSchema(SCHEMA, async (dataStore, db) => {
+          await dataStore.migrate();
+
+          // assert that id is the primary key of the users table
+          const actual = await all(db, "PRAGMA table_info(users);");
+          expect(actual).toEqual([
+            {
+              cid: 0,
+              name: "id",
+              type: "INTEGER",
+              notnull: 1,
+              dflt_value: null,
+              pk: 1,
+            },
+            {
+              cid: 1,
+              name: "name",
+              type: "TEXT",
+              notnull: 1,
+              dflt_value: null,
+              pk: 0,
+            },
+          ]);
+        }),
+      );
+
+      describe("when there is no column called id", () => {
+        const SCHEMA = {
+          tables: {
+            users: {
+              columns: {
+                name: "TEXT",
+              },
+            },
+          },
+        } satisfies Schema;
+
+        it(
+          "does not add a primary key",
+          testWithSchema(SCHEMA, async (dataStore, db) => {
+            await dataStore.migrate();
+
+            const actual = await all(db, "PRAGMA table_info(users);");
+            expect(actual).toEqual([
+              {
+                cid: 0,
+                name: "name",
+                type: "TEXT",
+                notnull: 1,
+                dflt_value: null,
+                pk: 0,
+              },
+            ]);
+          }),
+        );
+      });
+    });
   });
 });
