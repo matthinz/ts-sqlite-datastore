@@ -3,6 +3,7 @@ import {
   InsertRecordFor,
   InvalidUUIDError,
   Schema,
+  SerializationError,
   UniqueConstraintViolationError,
 } from "./sqlite-datastore";
 import { all, testWithSchema } from "./test-utils";
@@ -223,6 +224,96 @@ describe("#insert", () => {
               name: "foo",
             }),
           ).rejects.toThrow(InvalidUUIDError);
+        }),
+      );
+    });
+  });
+
+  describe("with insert_timestamp type", () => {
+    const SCHEMA = {
+      tables: {
+        people: {
+          columns: {
+            id: "uuid",
+            name: "TEXT",
+            created_at: "insert_timestamp",
+          },
+          primaryKey: "id",
+        },
+      },
+    } satisfies Schema;
+
+    describe("when no value provided for created_at", () => {
+      it(
+        "uses the current date/time",
+        testWithSchema(SCHEMA, async (dataStore, db) => {
+          await dataStore.insert("people", { name: "foo" });
+
+          const actual = await all(db, "SELECT * FROM people");
+
+          expect(actual).toHaveLength(1);
+
+          const { created_at: createdAt } = actual[0] as any;
+
+          expect(createdAt).not.toBeFalsy();
+
+          const date = new Date(createdAt);
+          expect(date).not.toBeNaN();
+        }),
+      );
+    });
+
+    describe("when Date provided for created_at", () => {
+      it(
+        "uses the date",
+        testWithSchema(SCHEMA, async (dataStore, db) => {
+          const date = new Date();
+
+          await dataStore.insert("people", { name: "foo", created_at: date });
+
+          const actual = await all(db, "SELECT * FROM people");
+
+          expect(actual).toHaveLength(1);
+
+          const actualCreatedAt = new Date((actual[0] as any).created_at);
+
+          expect(actualCreatedAt).toEqual(date);
+        }),
+      );
+    });
+
+    describe("when valid ISO date string provided for created_at", () => {
+      it(
+        "uses the date",
+        testWithSchema(SCHEMA, async (dataStore, db) => {
+          const date = new Date();
+
+          await dataStore.insert("people", {
+            name: "foo",
+            created_at: date.toISOString(),
+          });
+
+          const actual = await all(db, "SELECT * FROM people");
+
+          expect(actual).toHaveLength(1);
+
+          const actualCreatedAt = new Date((actual[0] as any).created_at);
+
+          expect(actualCreatedAt).toEqual(date);
+        }),
+      );
+    });
+
+    describe("when invalid value provided for created_at", () => {
+      it(
+        "throws a SerializationError",
+        testWithSchema(SCHEMA, async (dataStore, db) => {
+          await expect(async () => {
+            await dataStore.insert("people", {
+              name: "foo",
+              created_at: "i like pie",
+            });
+          }).rejects.toThrow(SerializationError);
         }),
       );
     });

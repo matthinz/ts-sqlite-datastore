@@ -78,6 +78,7 @@ For convenience, we also allow certain special "custom" types.
 | Type | Description |
 | -- | -- |
 | "uuid" | A universally-unique identifier, stored as a `TEXT` column with `UNIQUE` and `NOT NULL` constraints by default. |
+| "insert_timestamp" | A timestamp that is automatically set to the current time when a record is inserted. Stored as a `TEXT` column with a `NOT NULL` constraint. |
 
 */
 
@@ -92,7 +93,11 @@ type CustomTypeDefinition<
 > = {
   type: T;
   nullable: Nullable;
-  serialize(value: unknown): JsTypeForSqliteNativeType<T, Nullable>;
+  serialize(
+    value: unknown,
+    tableName: string,
+    columnName: string,
+  ): JsTypeForSqliteNativeType<T, Nullable>;
   parse(value: JsTypeForSqliteNativeType<T, false>): JsType;
   unique: Unique;
 };
@@ -119,6 +124,29 @@ const CUSTOM_TYPES: CustomTypeMap = {
       }
 
       return valueAsString;
+    },
+  },
+  insert_timestamp: {
+    type: "TEXT",
+    nullable: false,
+    unique: false,
+    parse: (value) => new Date(value as string),
+    serialize(value: unknown, tableName: string, columnName: string) {
+      value = value ?? new Date();
+
+      if (typeof value === "string") {
+        const valueAsDate = new Date(value);
+        if (isNaN(valueAsDate.getTime())) {
+          throw new SerializationError(tableName, columnName, value);
+        }
+        value = valueAsDate;
+      }
+
+      if (value instanceof Date) {
+        return value.toISOString();
+      }
+
+      throw new SerializationError(tableName, columnName, value);
     },
   },
 } as const;
@@ -755,6 +783,7 @@ SqliteDatastore wraps underlying sqlite errors in its own error types:
 | `InsertError` | `INSERT_ERROR` | An error occurred while inserting a record. |
 | `InvalidSchemaError` | `INVALID_SCHEMA` | The schema provided to the datastore is invalid. |
 | `NoSuchTableError` | `NO_SUCH_TABLE` | The table does not exist. |
+| `SerializationError` | `SERIALIZATION_ERROR` | An error occurred while serializing a value for writing to the database. |
 | `SyntaxError` | `SYNTAX_ERROR` | A syntax error occurred. |
 | `UniqueConstraintViolationError` | `UNIQUE_CONSTRAINT_VIOLATION` | A unique constraint was violated. |
 | `UnknownError` | `UNKNOWN_ERROR` | An unknown error occurred (see the error message for details). |
@@ -768,6 +797,7 @@ const ERROR_CODES = [
   "INVALID_SCHEMA",
   "INVALID_UUID",
   "NO_SUCH_TABLE",
+  "SERIALIZATION_ERROR",
   "SYNTAX_ERROR",
   "UNIQUE_CONSTRAINT_VIOLATION",
   "UNKNOWN_ERROR",
@@ -813,6 +843,23 @@ export class InvalidUUIDError extends SqliteDatastoreError {
 export class NoSuchTableError extends SqliteDatastoreError {
   constructor(public readonly tableName: string) {
     super(`No such table: ${tableName}`, "NO_SUCH_TABLE");
+  }
+}
+
+export class SerializationError extends SqliteDatastoreError {
+  #value: unknown;
+
+  constructor(tableName: string, columnName: string, value: unknown) {
+    super(
+      `Failed to serialize value for "${tableName}"."${columnName}"`,
+      "SERIALIZATION_ERROR",
+    );
+
+    this.#value = value;
+  }
+
+  get value(): unknown {
+    return this.#value;
   }
 }
 
@@ -1099,7 +1146,11 @@ export class SqliteDatastore<TSchema extends Schema> {
                 typeof columnSchema === "string" &&
                 columnSchema in CUSTOM_TYPES
               ) {
-                return CUSTOM_TYPES[columnSchema].serialize(value);
+                return CUSTOM_TYPES[columnSchema].serialize(
+                  value,
+                  tableName,
+                  String(columnName),
+                );
               }
 
               return value;

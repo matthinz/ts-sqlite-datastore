@@ -34,6 +34,7 @@ For convenience, we also allow certain special "custom" types.
 | Type | Description |
 | -- | -- |
 | "uuid" | A universally-unique identifier, stored as a `TEXT` column with `UNIQUE` and `NOT NULL` constraints by default. |
+| "insert_timestamp" | A timestamp that is automatically set to the current time when a record is inserted. Stored as a `TEXT` column with a `NOT NULL` constraint. |
 
 ## Schemas
 
@@ -192,6 +193,7 @@ SqliteDatastore wraps underlying sqlite errors in its own error types:
 | `InsertError` | `INSERT_ERROR` | An error occurred while inserting a record. |
 | `InvalidSchemaError` | `INVALID_SCHEMA` | The schema provided to the datastore is invalid. |
 | `NoSuchTableError` | `NO_SUCH_TABLE` | The table does not exist. |
+| `SerializationError` | `SERIALIZATION_ERROR` | An error occurred while serializing a value for writing to the database. |
 | `SyntaxError` | `SYNTAX_ERROR` | A syntax error occurred. |
 | `UniqueConstraintViolationError` | `UNIQUE_CONSTRAINT_VIOLATION` | A unique constraint was violated. |
 | `UnknownError` | `UNKNOWN_ERROR` | An unknown error occurred (see the error message for details). |
