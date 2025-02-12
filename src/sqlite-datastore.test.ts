@@ -101,6 +101,30 @@ describe("SqliteDatastore", () => {
       }),
     );
 
+    describe("when an invalid type specified", () => {
+      const SCHEMA = {
+        tables: {
+          people: {
+            columns: {
+              id: "INTEGER",
+              name: "INVALID",
+            },
+          },
+        },
+      } satisfies Schema;
+
+      it(
+        "throws an Error",
+        testWithSchema(SCHEMA, async (dataStore) => {
+          await expect(dataStore.migrate()).rejects.toThrow(
+            new InvalidSchemaError(
+              "Invalid type 'INVALID' for column 'name' in table 'people'",
+            ),
+          );
+        }),
+      );
+    });
+
     describe("when no primary key specified", () => {
       const SCHEMA = {
         tables: {

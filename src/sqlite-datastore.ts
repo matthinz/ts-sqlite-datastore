@@ -25,10 +25,17 @@ sqlite represents data using four types:
 
 */
 
+const SQLITE_TYPES = {
+  TEXT: true,
+  BLOB: true,
+  INTEGER: true,
+  REAL: true,
+} as const;
+
 /**
  * `SqliteNativeType` is one of the four native types supported by sqlite.
  */
-export type SqliteNativeType = "TEXT" | "BLOB" | "INTEGER" | "REAL";
+export type SqliteNativeType = keyof typeof SQLITE_TYPES;
 /*
 
 These four map *somewhat* cleanly onto Javascript types.
@@ -1462,6 +1469,12 @@ export class SqliteDatastore<TSchema extends Schema> {
 
       const { type } = columnSchema;
 
+      if (!this.isValidColumnType(type)) {
+        throw new InvalidSchemaError(
+          `Invalid type '${type}' for column '${columnNameAsString}' in table '${tableName}'`,
+        );
+      }
+
       const isPrimaryKey = Array.isArray(tableSchema.primaryKey)
         ? tableSchema.primaryKey.includes(String(columnName))
         : tableSchema.primaryKey === columnName ||
@@ -1629,6 +1642,14 @@ export class SqliteDatastore<TSchema extends Schema> {
     }
 
     return Array.from(columnNameSet);
+  }
+
+  private isValidColumnType(type: unknown): boolean {
+    if (typeof type !== "string") {
+      return false;
+    }
+
+    return type?.toUpperCase() in SQLITE_TYPES || type in CUSTOM_TYPES;
   }
 
   private runStatement(
