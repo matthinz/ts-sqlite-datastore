@@ -318,4 +318,57 @@ describe("#insert", () => {
       );
     });
   });
+
+  describe("with update_timestamp type", () => {
+    const SCHEMA = {
+      tables: {
+        people: {
+          columns: {
+            id: {
+              type: "INTEGER",
+              autoIncrement: true,
+            },
+            name: "TEXT",
+            updated_at: "update_timestamp",
+          },
+          primaryKey: "id",
+        },
+      },
+    } satisfies Schema;
+
+    describe("when specified in insert", () => {
+      it(
+        "ignores the specified value and sets to the current timestamp",
+        testWithSchema(SCHEMA, async (dataStore) => {
+          await dataStore.insert("people", {
+            name: "foo",
+            updated_at: new Date(2000, 0, 5),
+          });
+          const records = await dataStore.select("people");
+          expect(records).toHaveLength(1);
+
+          expect(records[0]).toHaveProperty("updated_at");
+          expect(records[0].updated_at).toBeInstanceOf(Date);
+          expect(records[0].updated_at.getTime()).toBeCloseTo(Date.now(), -1);
+        }),
+      );
+    });
+
+    describe("when not specified in insert", () => {
+      it(
+        "sets to the current timestamp",
+        testWithSchema(SCHEMA, async (dataStore) => {
+          await dataStore.insert("people", {
+            name: "foo",
+          });
+          const records = await dataStore.select("people");
+          expect(records).toHaveLength(1);
+
+          expect(records[0]).toHaveProperty("updated_at");
+          expect(records[0].updated_at).toBeInstanceOf(Date);
+          expect(records[0].updated_at.getTime()).toBeCloseTo(Date.now(), -1);
+        }),
+      );
+    });
+  });
 });

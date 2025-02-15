@@ -98,6 +98,12 @@ type CustomTypeDefinition<
   Nullable extends boolean,
   Unique extends boolean,
 > = {
+  beforeUpdate?: (
+    record: Record<string, unknown>,
+    tableName: string,
+    columnName: string,
+    columnSchema: ColumnSchema,
+  ) => void;
   type: T;
   nullable: Nullable;
   serialize(
@@ -154,6 +160,25 @@ const CUSTOM_TYPES: CustomTypeMap = {
       }
 
       throw new SerializationError(tableName, columnName, value);
+    },
+  },
+  update_timestamp: {
+    type: "TEXT",
+    nullable: false,
+    unique: false,
+    beforeUpdate: (
+      record,
+      _tableName: string,
+      columnName: string,
+      _columnSchema: ColumnSchema,
+    ) => {
+      record[columnName] = new Date().toISOString();
+    },
+    parse: (value) => {
+      return new Date(value as string);
+    },
+    serialize(value: unknown, tableName: string, columnName: string) {
+      return new Date().toISOString();
     },
   },
 } as const;
@@ -1136,10 +1161,11 @@ export class SqliteDatastore<TSchema extends Schema> {
           promise.then(async (result) => {
             const params = columnNames.map((columnName) => {
               const value = record[columnName as keyof typeof record];
-              const columnSchema =
+              const columnSchema = this.resolveColumnSchema(
                 tableSchema.columns[
                   columnName as keyof typeof tableSchema.columns
-                ];
+                ],
+              );
 
               if (
                 typeof columnSchema === "object" &&
@@ -1246,34 +1272,32 @@ export class SqliteDatastore<TSchema extends Schema> {
     return Promise.all([this.migrateIfNeeded(), this.prepare(sql, params)])
       .then(
         ([_, statement]) =>
-          new Promise<RecordFor<TSchema["tables"][TableName]>[]>(
-            (resolve, reject) => {
-              const rows = [] as ResultRecord[];
-              statement.each(
-                (err, row) => {
+          new Promise<ResultRecord[]>((resolve, reject) => {
+            const rows = [] as ResultRecord[];
+            statement.each(
+              (err, row) => {
+                if (err) {
+                  statement.finalize(() => reject(err));
+                  return;
+                }
+                rows.push(
+                  this.parseRow(
+                    tableSchema,
+                    row as RawRecordFor<TSchema["tables"][TableName]>,
+                  ),
+                );
+              },
+              (err) => {
+                statement.finalize((_finalizeErr) => {
                   if (err) {
-                    statement.finalize(() => reject(err));
+                    reject(err);
                     return;
                   }
-                  rows.push(
-                    this.parseRow(
-                      tableSchema,
-                      row as RawRecordFor<TSchema["tables"][TableName]>,
-                    ),
-                  );
-                },
-                (err) => {
-                  statement.finalize((_finalizeErr) => {
-                    if (err) {
-                      reject(err);
-                      return;
-                    }
-                    resolve(rows);
-                  });
-                },
-              );
-            },
-          ),
+                  resolve(rows);
+                });
+              },
+            );
+          }),
       )
       .catch((err) => Promise.reject(this.adaptSqliteError(err, sql)));
   }
@@ -1334,10 +1358,16 @@ export class SqliteDatastore<TSchema extends Schema> {
           : { ...maybeOptionsOrRecords, table: optionsOrTableName }
         : (optionsOrTableName as UpdateOptions<TSchema, TableName>);
 
-    const tableName = String(options.table);
+    const tableName = String(options.table) as TableName;
+
+    const tableSchema = this.#schema["tables"][
+      tableName as string
+    ] as TSchema["tables"][TableName];
 
     if ("records" in options) {
-      throw new Error("Not implemented");
+      throw new Error(
+        "Support for updating specific records directly is not yet implemented.",
+      );
     }
 
     const set = "set" in options ? options.set : undefined;
@@ -1346,15 +1376,21 @@ export class SqliteDatastore<TSchema extends Schema> {
       throw new Error();
     }
 
-    const sqlClauses = [`UPDATE "${tableName}" SET `];
+    const valuesForUpdate = this.getValuesForUpdate(
+      tableName,
+      tableSchema,
+      set,
+    );
+
+    const sqlClauses = [`UPDATE "${String(tableName)}" SET `];
     const params: unknown[] = [];
 
-    Object.keys(set).forEach((columnName) => {
+    Object.entries(valuesForUpdate).forEach(([columnName, value]) => {
       if (sqlClauses.length > 1) {
         sqlClauses.push(", ");
       }
       sqlClauses.push(`"${columnName}" = ?`);
-      params.push(set[columnName]);
+      params.push(value);
     });
 
     const [whereClause, whereParams] =
@@ -1560,8 +1596,13 @@ export class SqliteDatastore<TSchema extends Schema> {
     const parsedRow = {} as RecordFor<Table>;
 
     for (const [columnName, columnValue] of Object.entries(row)) {
-      const columnSchema =
+      const rawColumnSchema =
         tableSchema.columns[columnName as keyof typeof tableSchema.columns];
+
+      const columnSchema =
+        typeof rawColumnSchema === "string" && rawColumnSchema in CUSTOM_TYPES
+          ? CUSTOM_TYPES[rawColumnSchema]
+          : rawColumnSchema;
 
       if (
         typeof columnSchema === "object" &&
@@ -1644,12 +1685,84 @@ export class SqliteDatastore<TSchema extends Schema> {
     return Array.from(columnNameSet);
   }
 
+  /**
+   * Given a set of values for an update, resolves the set of values to
+   * _actually_ be applied (after running serialization etc.)
+   * @param tableName
+   * @param tableSchema
+   * @param set
+   */
+  private getValuesForUpdate<TableName extends TableNames<TSchema>>(
+    tableName: TableName,
+    tableSchema: TSchema["tables"][TableName],
+    set: Partial<RecordFor<TSchema["tables"][TableName]>>,
+  ): { [key: string]: unknown } {
+    const result: { [key: string]: unknown } = {};
+
+    Object.entries(set).forEach(([columnName, value]) => {
+      const columnSchema = this.resolveColumnSchema(
+        tableSchema.columns[columnName],
+      );
+
+      if (
+        typeof columnSchema === "object" &&
+        "serialize" in columnSchema &&
+        typeof columnSchema.serialize === "function"
+      ) {
+        result[columnName] = columnSchema.serialize(value);
+      } else {
+        result[columnName] = value;
+      }
+    });
+
+    // Execute beforeUpdate hooks for each column
+    // TODO: Cache a list of column that actually have these hooks
+    Object.keys(tableSchema.columns).forEach((columnName) => {
+      const columnSchema = this.resolveColumnSchema(
+        tableSchema.columns[columnName],
+      );
+
+      if (
+        typeof columnSchema === "object" &&
+        "beforeUpdate" in columnSchema &&
+        typeof columnSchema.beforeUpdate === "function"
+      ) {
+        const beforeUpdate = columnSchema.beforeUpdate as CustomTypeDefinition<
+          SqliteNativeType,
+          any,
+          boolean,
+          boolean
+        >["beforeUpdate"];
+
+        beforeUpdate!(result, String(tableName), columnName, columnSchema);
+      }
+    });
+
+    return result;
+  }
+
   private isValidColumnType(type: unknown): boolean {
     if (typeof type !== "string") {
       return false;
     }
 
     return type?.toUpperCase() in SQLITE_TYPES || type in CUSTOM_TYPES;
+  }
+
+  private resolveColumnSchema(
+    columnSchema: ColumnSchema | CustomTypeName | SqliteNativeType,
+  ): ColumnSchema | SqliteNativeType {
+    if (typeof columnSchema === "string") {
+      if (columnSchema in CUSTOM_TYPES) {
+        return CUSTOM_TYPES[columnSchema];
+      } else if (columnSchema in SQLITE_TYPES) {
+        return columnSchema as SqliteNativeType;
+      }
+    } else if (typeof columnSchema === "object") {
+      return columnSchema;
+    }
+
+    throw new InvalidSchemaError(`Invalid column type: ${columnSchema}`);
   }
 
   private runStatement(
