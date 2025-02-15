@@ -628,7 +628,8 @@ type InsertResultWithoutIds = {
   readonly count: number;
 };
 
-type HasAutoIncrementingColumn<T extends TableSchema<string>> = {
+// Build a map of column names to whether they auto-increment
+type AutoIncrementingColumnMap<T extends TableSchema<string>> = {
   [columnName in keyof T["columns"]]: T["columns"][columnName] extends {
     autoIncrement: true;
   }
@@ -636,9 +637,17 @@ type HasAutoIncrementingColumn<T extends TableSchema<string>> = {
       true
     : // Column does not auto-increment
       false;
-}[keyof T["columns"]] extends true
-  ? true
-  : false;
+};
+
+// Return whether a given table has an auto-incrementing column
+type HasAutoIncrementingColumn<T extends TableSchema<string>> =
+  AutoIncrementingColumnMap<T>[keyof T["columns"]] extends false
+    ? // false means no column auto-increments
+      false
+    : AutoIncrementingColumnMap<T>[keyof T["columns"]] extends boolean
+      ? // boolean means at least one column auto-increments
+        true
+      : false;
 
 export type InsertResult<
   TSchema extends Schema,
