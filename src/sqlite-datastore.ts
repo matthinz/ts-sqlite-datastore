@@ -702,24 +702,36 @@ export type LessThanOrEqualToComparison<Table extends TableSchema<string>> = {
   eq: Table["columns"] | number;
 };
 
+type CriteriaValuesForNumbers<Table extends TableSchema<string>> =
+  | number
+  | number[]
+  | undefined
+  | null
+  | GreaterThanComparison<Table>
+  | GreaterThanOrEqualToComparison<Table>
+  | LessThanComparison<Table>
+  | LessThanOrEqualToComparison<Table>;
+
 // Track what kinds of values we accept for a column-based criteria
-type ValueForCriteria<
+export type ValueForCriteria<
   Table extends TableSchema<string>,
   ColumnName extends ColumnNames<Table>,
 > =
   JsTypeForColumnSchema<Table["columns"][ColumnName]> extends string
     ? /* string */ string | string[] | undefined | null
-    : JsTypeForColumnSchema<Table["columns"][ColumnName]> extends number
-      ? /* number */
-        | number
-          | number[]
+    : JsTypeForColumnSchema<Table["columns"][ColumnName]> extends
+          | number
           | undefined
           | null
-          | GreaterThanComparison<Table>
-          | GreaterThanOrEqualToComparison<Table>
-          | LessThanComparison<Table>
-          | LessThanOrEqualToComparison<Table>
-      : never;
+      ? /* number */
+        CriteriaValuesForNumbers<Table>
+      : JsTypeForColumnSchema<Table["columns"][ColumnName]> extends
+            | number
+            | bigint
+            | undefined
+            | null
+        ? CriteriaValuesForNumbers<Table>
+        : never;
 
 export type Criteria<Table extends TableSchema<string>> = {
   [columnName in ColumnNames<Table>]?: ValueForCriteria<Table, columnName>;

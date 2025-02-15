@@ -74,6 +74,31 @@ describe("#select", () => {
     );
   });
 
+  describe("select by id", () => {
+    describe("single value", () => {
+      it(
+        "selects the record",
+        testWithSchema(TEST_SCHEMA, async (dataStore, db) => {
+          const result = await dataStore.insert("people", [
+            { name: "foo" },
+            { name: "bar" },
+          ]);
+
+          expect(result).toHaveProperty("count", 2);
+          expect(result).toHaveProperty("ids", [1, 2]);
+
+          const records = await dataStore.select("people", {
+            where: { id: 1 },
+          });
+
+          expect(records).toEqual([{ id: 1, name: "foo", birthdate: null }]);
+        }),
+      );
+    });
+
+    describe("array of values", () => {});
+  });
+
   describe("with custom parser on column", () => {
     const SCHEMA = {
       tables: {
