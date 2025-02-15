@@ -778,6 +778,7 @@ await dataStore.delete("people", {
     name: "Joey Joe-Joe Junior Shabadoo",
   },
 });
+```
 
 `delete` returns a structure describing how the delete went:
 
