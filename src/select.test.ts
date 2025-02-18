@@ -190,7 +190,7 @@ describe("#select", () => {
         await dataStore.migrate();
         await runSql(db, "DROP TABLE people");
 
-        expect(dataStore.select("people")).rejects.toThrow(
+        await expect(dataStore.select("people")).rejects.toThrow(
           new NoSuchTableError("people"),
         );
       }),

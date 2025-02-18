@@ -200,5 +200,6 @@ SqliteDatastore wraps underlying sqlite errors in its own error types:
 | `SyntaxError` | `SYNTAX_ERROR` | A syntax error occurred. |
 | `UniqueConstraintViolationError` | `UNIQUE_CONSTRAINT_VIOLATION` | A unique constraint was violated. |
 | `UnknownError` | `UNKNOWN_ERROR` | An unknown error occurred (see the error message for details). |
+| `UpdateError` | `UPDATE_ERROR` | An error occurred while updating records. |
 
 The base class for these errors is `SqliteDatastoreError`.

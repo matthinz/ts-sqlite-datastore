@@ -94,26 +94,36 @@ For convenience, we also allow certain special "custom" types.
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+type BeforeInsertHook = (
+  record: Record<string, unknown>,
+  tableName: string,
+  columnName: string,
+  columnSchema: ColumnSchema,
+) => void;
+
+type BeforeUpdateHook = (
+  record: Record<string, unknown>,
+  tableName: string,
+  columnName: string,
+  columnSchema: ColumnSchema,
+) => void;
+
 type CustomTypeDefinition<
   T extends SqliteNativeType,
   JsType,
   Nullable extends boolean,
   Unique extends boolean,
 > = {
-  beforeUpdate?: (
-    record: Record<string, unknown>,
-    tableName: string,
-    columnName: string,
-    columnSchema: ColumnSchema,
-  ) => void;
+  beforeInsert?: BeforeInsertHook;
+  beforeUpdate?: BeforeUpdateHook;
   type: T;
   nullable: Nullable;
-  serialize(
+  serialize?(
     value: unknown,
     tableName: string,
     columnName: string,
   ): JsTypeForSqliteNativeType<T, Nullable>;
-  parse(value: JsTypeForSqliteNativeType<T, false>): JsType;
+  parse?(value: JsTypeForSqliteNativeType<T, false>): JsType;
   unique: Unique;
 };
 
@@ -146,41 +156,66 @@ const CUSTOM_TYPES: CustomTypeMap = {
     nullable: false,
     unique: false,
     parse: (value) => new Date(value as string),
-    serialize(value: unknown, tableName: string, columnName: string) {
-      value = value ?? new Date();
-
-      if (typeof value === "string") {
-        const valueAsDate = new Date(value);
-        if (isNaN(valueAsDate.getTime())) {
-          throw new SerializationError(tableName, columnName, value);
-        }
-        value = valueAsDate;
+    beforeInsert: (
+      record,
+      _tableName: string,
+      columnName: string,
+      _columnSchema: ColumnSchema,
+    ) => {
+      if (record[columnName] != null) {
+        throw new InsertError(
+          "Specifying a value for an insert_timestamp column is not allowed",
+        );
       }
-
-      if (value instanceof Date) {
-        return value.toISOString();
-      }
-
-      throw new SerializationError(tableName, columnName, value);
+      record[columnName] = new Date().toISOString();
     },
-  },
-  update_timestamp: {
-    type: "TEXT",
-    nullable: false,
-    unique: false,
     beforeUpdate: (
       record,
       _tableName: string,
       columnName: string,
       _columnSchema: ColumnSchema,
     ) => {
+      if (record[columnName] != null) {
+        throw new UpdateError(
+          "Specifying a value for an insert_timestamp column is not allowed",
+        );
+      }
+    },
+  },
+  update_timestamp: {
+    type: "TEXT",
+    nullable: false,
+    unique: false,
+    beforeInsert: (
+      record,
+      _tableName: string,
+      columnName: string,
+      _columnSchema: ColumnSchema,
+    ) => {
+      if (record[columnName] != null) {
+        throw new InsertError(
+          "Specifying a value for an update_timestamp column is not allowed",
+        );
+      }
+
+      record[columnName] = new Date().toISOString();
+    },
+    beforeUpdate: (
+      record,
+      _tableName: string,
+      columnName: string,
+      _columnSchema: ColumnSchema,
+    ) => {
+      if (record[columnName] != null) {
+        throw new UpdateError(
+          "Specifying a value for an update_timestamp column is not allowed",
+        );
+      }
+
       record[columnName] = new Date().toISOString();
     },
     parse: (value) => {
       return new Date(value as string);
-    },
-    serialize(value: unknown, tableName: string, columnName: string) {
-      return new Date().toISOString();
     },
   },
 } as const;
@@ -843,6 +878,7 @@ SqliteDatastore wraps underlying sqlite errors in its own error types:
 | `SyntaxError` | `SYNTAX_ERROR` | A syntax error occurred. |
 | `UniqueConstraintViolationError` | `UNIQUE_CONSTRAINT_VIOLATION` | A unique constraint was violated. |
 | `UnknownError` | `UNKNOWN_ERROR` | An unknown error occurred (see the error message for details). |
+| `UpdateError` | `UPDATE_ERROR` | An error occurred while updating records. |
 
 The base class for these errors is `SqliteDatastoreError`.
 
@@ -857,6 +893,7 @@ const ERROR_CODES = [
   "SYNTAX_ERROR",
   "UNIQUE_CONSTRAINT_VIOLATION",
   "UNKNOWN_ERROR",
+  "UPDATE_ERROR",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -946,6 +983,12 @@ export class UniqueConstraintViolationError extends SqliteDatastoreError {
 export class UnknownError extends SqliteDatastoreError {
   constructor(message: string) {
     super(message, "UNKNOWN_ERROR");
+  }
+}
+
+export class UpdateError extends SqliteDatastoreError {
+  constructor(message: string) {
+    super(message, "UPDATE_ERROR");
   }
 }
 
@@ -1164,54 +1207,30 @@ export class SqliteDatastore<TSchema extends Schema> {
       tableName
     ] as TSchema["tables"][TableName];
 
-    const columnNames = this.getColumnNamesForInsert<
-      TSchema["tables"][TableName]
-    >(tableName, tableSchema, records);
+    const { records: recordsForInsert, columnNames } = this.getRecordsForInsert(
+      tableName,
+      tableSchema,
+      records,
+    );
 
     const sql = [
       `INSERT INTO "${tableName}" `,
       "(",
-      columnNames.map((c) => `"${String(c)}"`).join(","),
+      columnNames.map((c) => `"${c}"`).join(","),
       ") VALUES (",
       columnNames.map(() => "?").join(","),
       ")",
     ].join("");
 
+    // TODO: Multi-insert in batches
+
     const statement = await this.prepare(sql);
 
-    return records
+    return recordsForInsert
       .reduce<Promise<InsertResult<TSchema, TableName>>>(
         (promise, record) =>
           promise.then(async (result) => {
-            const params = columnNames.map((columnName) => {
-              const value = record[columnName as keyof typeof record];
-              const columnSchema = this.resolveColumnSchema(
-                tableSchema.columns[
-                  columnName as keyof typeof tableSchema.columns
-                ],
-              );
-
-              if (
-                typeof columnSchema === "object" &&
-                "serialize" in columnSchema &&
-                typeof columnSchema.serialize === "function"
-              ) {
-                return columnSchema.serialize(value);
-              }
-
-              if (
-                typeof columnSchema === "string" &&
-                columnSchema in CUSTOM_TYPES
-              ) {
-                return CUSTOM_TYPES[columnSchema].serialize(
-                  value,
-                  tableName,
-                  String(columnName),
-                );
-              }
-
-              return value;
-            });
+            const params = columnNames.map((columnName) => record[columnName]);
 
             const { lastID } = await this.runStatement(statement, params);
             (result as any).count += 1;
@@ -1375,62 +1394,62 @@ export class SqliteDatastore<TSchema extends Schema> {
       | Omit<UpdateOptions<TSchema, TableName>, "table">
       | RecordFor<TSchema["tables"][TableName]>[],
   ): Promise<UpdateResult> {
-    const options =
-      typeof optionsOrTableName === "string"
-        ? Array.isArray(maybeOptionsOrRecords)
-          ? { records: maybeOptionsOrRecords, table: optionsOrTableName }
-          : { ...maybeOptionsOrRecords, table: optionsOrTableName }
-        : (optionsOrTableName as UpdateOptions<TSchema, TableName>);
+    return this.migrateIfNeeded().then(async (db) => {
+      const options =
+        typeof optionsOrTableName === "string"
+          ? Array.isArray(maybeOptionsOrRecords)
+            ? { records: maybeOptionsOrRecords, table: optionsOrTableName }
+            : { ...maybeOptionsOrRecords, table: optionsOrTableName }
+          : (optionsOrTableName as UpdateOptions<TSchema, TableName>);
 
-    const tableName = String(options.table) as TableName;
+      const tableName = String(options.table) as TableName;
 
-    const tableSchema = this.#schema["tables"][
-      tableName as string
-    ] as TSchema["tables"][TableName];
+      const tableSchema = this.#schema["tables"][
+        tableName as string
+      ] as TSchema["tables"][TableName];
 
-    if ("records" in options) {
-      throw new Error(
-        "Support for updating specific records directly is not yet implemented.",
-      );
-    }
-
-    const set = "set" in options ? options.set : undefined;
-
-    if (!set) {
-      throw new Error();
-    }
-
-    const valuesForUpdate = this.getValuesForUpdate(
-      tableName,
-      tableSchema,
-      set,
-    );
-
-    const sqlClauses = [`UPDATE "${String(tableName)}" SET `];
-    const params: unknown[] = [];
-
-    Object.entries(valuesForUpdate).forEach(([columnName, value]) => {
-      if (sqlClauses.length > 1) {
-        sqlClauses.push(", ");
+      if ("records" in options) {
+        throw new Error(
+          "Support for updating specific records directly is not yet implemented.",
+        );
       }
-      sqlClauses.push(`"${columnName}" = ?`);
-      params.push(value);
-    });
 
-    const [whereClause, whereParams] =
-      "where" in options
-        ? this.buildWhereClause(options.where)
-        : [undefined, []];
+      const set = "set" in options ? options.set : undefined;
 
-    if (whereClause) {
-      sqlClauses.push(whereClause);
-      params.push(...whereParams);
-    }
+      if (!set) {
+        throw new Error();
+      }
 
-    const sql = sqlClauses.join("");
+      const valuesForUpdate = this.getValuesForUpdate(
+        tableName,
+        tableSchema,
+        set,
+      );
 
-    return this.migrateIfNeeded().then((db) =>
-      new Promise<UpdateResult>((resolve, reject) => {
+      const sqlClauses = [`UPDATE "${String(tableName)}" SET `];
+      const params: unknown[] = [];
+
+      Object.entries(valuesForUpdate).forEach(([columnName, value]) => {
+        if (sqlClauses.length > 1) {
+          sqlClauses.push(", ");
+        }
+        sqlClauses.push(`"${columnName}" = ?`);
+        params.push(value);
+      });
+
+      const [whereClause, whereParams] =
+        "where" in options
+          ? this.buildWhereClause(options.where)
+          : [undefined, []];
+
+      if (whereClause) {
+        sqlClauses.push(whereClause);
+        params.push(...whereParams);
+      }
+
+      const sql = sqlClauses.join("");
+
+      return new Promise<UpdateResult>((resolve, reject) => {
         db.run(sql, params, function (err) {
           if (err) {
             reject(err);
@@ -1439,8 +1458,8 @@ export class SqliteDatastore<TSchema extends Schema> {
 
           resolve({ count: this.changes });
         });
-      }).catch((err) => Promise.reject(this.adaptSqliteError(err, sql))),
-    );
+      }).catch((err) => Promise.reject(this.adaptSqliteError(err, sql)));
+    });
   }
 
   protected buildWhereClause<Table extends TableSchema<string>>(
@@ -1572,6 +1591,62 @@ export class SqliteDatastore<TSchema extends Schema> {
     return this.executeSql(sql);
   }
 
+  /**
+   * Default beforeInsert hook implementation.
+   * Adds support for custom column serializers.
+   * @param record
+   * @param tableName
+   * @param columnName
+   * @param columnSchema
+   */
+  defaultBeforeInsert(
+    record: Record<string, unknown>,
+    _tableName: string,
+    columnName: string,
+    columnSchema: ColumnSchema,
+  ) {
+    const value = record[columnName];
+
+    const serialize =
+      typeof columnSchema === "object" &&
+      "serialize" in columnSchema &&
+      typeof columnSchema.serialize === "function"
+        ? columnSchema.serialize
+        : undefined;
+
+    if (serialize != null) {
+      record[columnName] = serialize(value);
+    }
+  }
+
+  /**
+   * Default beforeUpdate hook implementation.
+   * Adds support for custom column serializers.
+   * @param record
+   * @param tableName
+   * @param columnName
+   * @param columnSchema
+   */
+  defaultBeforeUpdate(
+    record: Record<string, unknown>,
+    _tableName: string,
+    columnName: string,
+    columnSchema: ColumnSchema,
+  ) {
+    const value = record[columnName];
+
+    const serialize =
+      typeof columnSchema === "object" &&
+      "serialize" in columnSchema &&
+      typeof columnSchema.serialize === "function"
+        ? columnSchema.serialize
+        : undefined;
+
+    if (serialize != null) {
+      record[columnName] = serialize(value);
+    }
+  }
+
   protected executeSql(sql: string, ...params: unknown[]): Promise<void> {
     return this.prepare(sql).then((statement) =>
       new Promise<void>((resolve, reject) => {
@@ -1658,55 +1733,73 @@ export class SqliteDatastore<TSchema extends Schema> {
     );
   }
 
-  private getColumnNamesForInsert<Table extends TableSchema<string>>(
+  /**
+   * Given an Array of records being inserted, returns a _new_ Array where each
+   * member has all columns that will be inserted, with beforeInsert hooks
+   * applied.
+   * @param tableName
+   * @param tableSchema
+   * @param records
+   */
+  private getRecordsForInsert<Table extends TableSchema<string>>(
     tableName: string,
     tableSchema: Table,
     records: InsertRecordFor<Table>[],
-  ): ColumnNames<Table>[] {
-    const validColumnNames = new Set<string>(Object.keys(tableSchema.columns));
+  ): { records: Record<string, unknown>[]; columnNames: string[] } {
+    const columnNames = new Set<string>(Object.keys(tableSchema.columns));
 
-    // Each incoming record may specify a different set of columns to insert.
-    // We want to build a single INSERT statement to cover all cases.
-    // So first, we need a set of all columns that will be inserted.
-    // TODO: Provide an option ("unchecked"?) to allow faster inserts without
-    // these pre-checks.
-    const columnNameSet = new Set<keyof InsertRecordFor<Table>>();
+    type BeforeInsertHook = (r: Record<string, unknown>) => void;
+    const beforeInsertHooks: BeforeInsertHook[] = [];
 
-    // If a column is non-nullable, we need to _try_ to insert a value.
-    // This ensures that any custom serializers will be run even if the
-    // column is not present
-    Object.entries(tableSchema.columns).forEach(
-      ([columnName, columnSchema]) => {
-        const nullable =
-          (typeof columnSchema === "string" &&
-            columnSchema in CUSTOM_TYPES &&
-            CUSTOM_TYPES[columnSchema].nullable) ||
-          (typeof columnSchema === "object" &&
-            "nullable" in columnSchema &&
-            columnSchema.nullable);
-        if (!nullable) {
-          columnNameSet.add(columnName as keyof InsertRecordFor<Table>);
-        }
-      },
-    );
+    for (const columnName of columnNames) {
+      const columnSchema = this.resolveColumnSchema(
+        tableSchema.columns[columnName],
+      );
 
-    for (const record of records) {
-      Object.keys(record).forEach((columnName) => {
-        if (!validColumnNames.has(columnName)) {
-          throw new InsertError(
-            `Column '${columnName}' not found on table '${tableName}'`,
-          );
-        }
+      const beforeInsert = this.resolveBeforeInsertHook(columnSchema);
 
-        columnNameSet.add(columnName as keyof InsertRecordFor<Table>);
-      });
-
-      if (columnNameSet.size === validColumnNames.size) {
-        break;
+      if (beforeInsert != null) {
+        beforeInsertHooks.push((r) => {
+          beforeInsert!(r, tableName, columnName, columnSchema);
+        });
       }
     }
 
-    return Array.from(columnNameSet);
+    const recordsForInsert = records.map((record) => {
+      // Allocate a new object to hold the new record's values.
+      // There may be scenarios where we can avoid allocation, and
+      // we may eventually want to allow opting into (or out of)
+      // in-place modification.
+      // We're also checking for column names that aren't actually in the
+      // schema--we could make that opt-in/out as well.
+
+      // TODO: Use Set.prototype.difference when we are targeting >= Node 22
+      for (const key of Object.keys(record)) {
+        if (!columnNames.has(key)) {
+          throw new InsertError(
+            `Column '${key}' not found on table '${tableName}'`,
+          );
+        }
+      }
+
+      const newRecord: Record<string, unknown> = {};
+
+      for (const columnName of columnNames) {
+        newRecord[columnName] =
+          record[columnName as keyof InsertRecordFor<Table>];
+      }
+
+      // Fire the `beforeInsert` hook for each column.
+      // These will handle things like custom serialization and default values.
+      beforeInsertHooks.forEach((hook) => hook(newRecord));
+
+      return newRecord;
+    });
+
+    return {
+      records: recordsForInsert,
+      columnNames: Array.from(columnNames),
+    };
   }
 
   /**
@@ -1720,49 +1813,45 @@ export class SqliteDatastore<TSchema extends Schema> {
     tableName: TableName,
     tableSchema: TSchema["tables"][TableName],
     set: Partial<RecordFor<TSchema["tables"][TableName]>>,
-  ): { [key: string]: unknown } {
-    const result: { [key: string]: unknown } = {};
+  ): Record<string, unknown> {
+    const values: Record<string, unknown> = {};
+    const columnNamesInUpdate = Object.keys(set);
 
-    Object.entries(set).forEach(([columnName, value]) => {
+    columnNamesInUpdate.forEach((columnName) => {
+      if (tableSchema.columns[columnName] == null) {
+        throw new UpdateError(`Invalid column name: "${columnName}"`);
+      }
+      values[columnName] = set[columnName];
+    });
+
+    // Apply beforeUpdate hooks
+    columnNamesInUpdate.forEach((columnName) => {
       const columnSchema = this.resolveColumnSchema(
         tableSchema.columns[columnName],
       );
 
-      if (
-        typeof columnSchema === "object" &&
-        "serialize" in columnSchema &&
-        typeof columnSchema.serialize === "function"
-      ) {
-        result[columnName] = columnSchema.serialize(value);
-      } else {
-        result[columnName] = value;
+      if ("beforeUpdate" in columnSchema) {
+        if (typeof columnSchema.beforeUpdate !== "function") {
+          throw new InvalidSchemaError(`Invalid beforeUpdate hook`);
+        }
+
+        columnSchema.beforeUpdate(values, tableName, columnName, columnSchema);
+        return;
+      }
+
+      const hasCustomSerialization = "serialize" in columnSchema;
+
+      if (hasCustomSerialization) {
+        this.defaultBeforeUpdate(
+          values,
+          String(tableName),
+          columnName,
+          columnSchema,
+        );
       }
     });
 
-    // Execute beforeUpdate hooks for each column
-    // TODO: Cache a list of column that actually have these hooks
-    Object.keys(tableSchema.columns).forEach((columnName) => {
-      const columnSchema = this.resolveColumnSchema(
-        tableSchema.columns[columnName],
-      );
-
-      if (
-        typeof columnSchema === "object" &&
-        "beforeUpdate" in columnSchema &&
-        typeof columnSchema.beforeUpdate === "function"
-      ) {
-        const beforeUpdate = columnSchema.beforeUpdate as CustomTypeDefinition<
-          SqliteNativeType,
-          any,
-          boolean,
-          boolean
-        >["beforeUpdate"];
-
-        beforeUpdate!(result, String(tableName), columnName, columnSchema);
-      }
-    });
-
-    return result;
+    return values;
   }
 
   private isValidColumnType(type: unknown): boolean {
@@ -1773,14 +1862,43 @@ export class SqliteDatastore<TSchema extends Schema> {
     return type?.toUpperCase() in SQLITE_TYPES || type in CUSTOM_TYPES;
   }
 
+  private resolveBeforeInsertHook(
+    columnSchema: ColumnSchema | CustomTypeName | SqliteNativeType,
+  ): BeforeInsertHook | undefined {
+    const resolvedColumnSchema = this.resolveColumnSchema(columnSchema);
+
+    if (typeof resolvedColumnSchema === "object") {
+      if ("beforeInsert" in resolvedColumnSchema) {
+        if (typeof resolvedColumnSchema.beforeInsert !== "function") {
+          throw new InvalidSchemaError(`Invalid beforeInsert hook`);
+        }
+
+        return resolvedColumnSchema.beforeInsert as BeforeInsertHook;
+      }
+    }
+
+    // If no beforeInsert hook is defined, we fall back to
+    // defaultBeforeInsertHook. However, if there are no features of this
+    // column that would _require_ a beforeInsert hook, we can skip it.
+
+    const hasDefaultValue = false; // TODO
+    const hasCustomSerialization =
+      typeof resolvedColumnSchema === "object" &&
+      "serialize" in resolvedColumnSchema;
+
+    if (hasDefaultValue || hasCustomSerialization) {
+      return this.defaultBeforeInsert;
+    }
+  }
+
   private resolveColumnSchema(
     columnSchema: ColumnSchema | CustomTypeName | SqliteNativeType,
-  ): ColumnSchema | SqliteNativeType {
+  ): ColumnSchema {
     if (typeof columnSchema === "string") {
       if (columnSchema in CUSTOM_TYPES) {
         return CUSTOM_TYPES[columnSchema];
       } else if (columnSchema in SQLITE_TYPES) {
-        return columnSchema as SqliteNativeType;
+        return { type: columnSchema as SqliteNativeType };
       }
     } else if (typeof columnSchema === "object") {
       return columnSchema;
