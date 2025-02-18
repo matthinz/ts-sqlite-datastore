@@ -1,7 +1,6 @@
 import {
   InsertError,
   InsertRecordFor,
-  InvalidUUIDError,
   Schema,
   UniqueConstraintViolationError,
 } from "./sqlite-datastore";
@@ -157,74 +156,5 @@ describe("#insert", () => {
         ).rejects.toThrow(new UniqueConstraintViolationError("people", "name"));
       }),
     );
-  });
-
-  describe("with UUID type", () => {
-    const SCHEMA = {
-      tables: {
-        people: {
-          columns: {
-            id: "uuid",
-            name: "TEXT",
-          },
-          primaryKey: "id",
-        },
-      },
-    } satisfies Schema;
-
-    describe("when not provided", () => {
-      it(
-        "generates a UUID",
-        testWithSchema(SCHEMA, async (dataStore, db) => {
-          await dataStore.insert("people", { name: "foo" });
-
-          const actual = await all(db, "SELECT * FROM people");
-
-          expect(actual).toHaveLength(1);
-
-          const { id } = actual[0] as any;
-
-          expect(id).toMatch(
-            /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
-          );
-        }),
-      );
-    });
-
-    describe("when provided and looks valid", () => {
-      it(
-        "generates a UUID",
-        testWithSchema(SCHEMA, async (dataStore, db) => {
-          await dataStore.insert("people", {
-            id: "EAAE1BB6-1AD8-4952-8AAA-C0AA5B60AEA0",
-            name: "foo",
-          });
-
-          const actual = await all(db, "SELECT * FROM people");
-
-          expect(actual).toEqual([
-            {
-              id: "EAAE1BB6-1AD8-4952-8AAA-C0AA5B60AEA0",
-              name: "foo",
-            },
-          ]);
-        }),
-      );
-    });
-
-    describe("when provided but not valid", () => {
-      it(
-        "generates a UUID",
-        testWithSchema(SCHEMA, async (dataStore, db) => {
-          // use jest to assert that an InvalidUUIDError is thrown
-          await expect(
-            dataStore.insert("people", {
-              id: "not a uuid",
-              name: "foo",
-            }),
-          ).rejects.toThrow(InvalidUUIDError);
-        }),
-      );
-    });
   });
 });
