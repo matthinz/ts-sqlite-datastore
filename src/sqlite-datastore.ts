@@ -121,11 +121,6 @@ type CustomTypeDefinition<
   beforeUpdate?: BeforeUpdateHook;
   type: T;
   nullable: Nullable;
-  serialize?(
-    value: unknown,
-    tableName: string,
-    columnName: string,
-  ): JsTypeForSqliteNativeType<T, Nullable>;
   parse?(value: JsTypeForSqliteNativeType<T, false>): JsType;
   unique: Unique;
 };
@@ -139,20 +134,26 @@ const CUSTOM_TYPES: CustomTypeMap = {
     type: "TEXT",
     nullable: false,
     unique: true,
-    parse: (value) => value,
-    serialize(value: unknown) {
-      if (value == null) {
-        return crypto.randomUUID();
+    beforeInsert: (record, _tableName, columnName) => {
+      if (record[columnName] == null) {
+        record[columnName] = crypto.randomUUID();
+        return;
       }
 
-      const valueAsString = String(value);
-
-      if (!UUID_REGEX.test(valueAsString)) {
+      if (!UUID_REGEX.test(String(record[columnName]))) {
         throw new InvalidUUIDError();
       }
-
-      return valueAsString;
     },
+    beforeUpdate: (record, _tableName, columnName, _columnSchema) => {
+      if (record[columnName] == null) {
+        return;
+      }
+
+      if (!UUID_REGEX.test(String(record[columnName]))) {
+        throw new InvalidUUIDError();
+      }
+    },
+    parse: (value) => value,
   },
   insert_timestamp: {
     type: "TEXT",
