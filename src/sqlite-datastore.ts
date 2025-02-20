@@ -99,16 +99,16 @@ const UUID_REGEX =
 
 type BeforeInsertHook = (
   record: Record<string, unknown>,
-  tableName: string,
   columnName: string,
   columnSchema: ColumnSchema,
+  tableName: string,
 ) => void;
 
 type BeforeUpdateHook = (
   record: Record<string, unknown>,
-  tableName: string,
   columnName: string,
   columnSchema: ColumnSchema,
+  tableName: string,
 ) => void;
 
 type CustomTypeDefinition<
@@ -134,7 +134,7 @@ const CUSTOM_TYPES: CustomTypeMap = {
     type: "TEXT",
     nullable: false,
     unique: true,
-    beforeInsert: (record, _tableName, columnName) => {
+    beforeInsert: (record, columnName) => {
       if (record[columnName] == null) {
         record[columnName] = crypto.randomUUID();
         return;
@@ -144,7 +144,7 @@ const CUSTOM_TYPES: CustomTypeMap = {
         throw new InvalidUUIDError();
       }
     },
-    beforeUpdate: (record, _tableName, columnName, _columnSchema) => {
+    beforeUpdate: (record, columnName) => {
       if (record[columnName] == null) {
         return;
       }
@@ -160,12 +160,7 @@ const CUSTOM_TYPES: CustomTypeMap = {
     nullable: false,
     unique: false,
     parse: (value) => new Date(value as string),
-    beforeInsert: (
-      record,
-      _tableName: string,
-      columnName: string,
-      _columnSchema: ColumnSchema,
-    ) => {
+    beforeInsert: (record, columnName: string) => {
       if (record[columnName] != null) {
         throw new InsertError(
           "Specifying a value for an insert_timestamp column is not allowed",
@@ -173,12 +168,7 @@ const CUSTOM_TYPES: CustomTypeMap = {
       }
       record[columnName] = new Date().toISOString();
     },
-    beforeUpdate: (
-      record,
-      _tableName: string,
-      columnName: string,
-      _columnSchema: ColumnSchema,
-    ) => {
+    beforeUpdate: (record, columnName: string) => {
       if (record[columnName] != null) {
         throw new UpdateError(
           "Specifying a value for an insert_timestamp column is not allowed",
@@ -190,12 +180,7 @@ const CUSTOM_TYPES: CustomTypeMap = {
     type: "TEXT",
     nullable: false,
     unique: false,
-    beforeInsert: (
-      record,
-      _tableName: string,
-      columnName: string,
-      _columnSchema: ColumnSchema,
-    ) => {
+    beforeInsert: (record, columnName: string) => {
       if (record[columnName] != null) {
         throw new InsertError(
           "Specifying a value for an update_timestamp column is not allowed",
@@ -204,12 +189,7 @@ const CUSTOM_TYPES: CustomTypeMap = {
 
       record[columnName] = new Date().toISOString();
     },
-    beforeUpdate: (
-      record,
-      _tableName: string,
-      columnName: string,
-      _columnSchema: ColumnSchema,
-    ) => {
+    beforeUpdate: (record, columnName: string) => {
       if (record[columnName] != null) {
         throw new UpdateError(
           "Specifying a value for an update_timestamp column is not allowed",
@@ -1605,9 +1585,9 @@ export class SqliteDatastore<TSchema extends Schema> {
    */
   defaultBeforeInsert(
     record: Record<string, unknown>,
-    _tableName: string,
     columnName: string,
     columnSchema: ColumnSchema,
+    _tableName: string,
   ) {
     let value = record[columnName];
 
@@ -1639,9 +1619,9 @@ export class SqliteDatastore<TSchema extends Schema> {
    */
   defaultBeforeUpdate(
     record: Record<string, unknown>,
-    _tableName: string,
     columnName: string,
     columnSchema: ColumnSchema,
+    _tableName: string,
   ) {
     const value = record[columnName];
 
@@ -1770,7 +1750,7 @@ export class SqliteDatastore<TSchema extends Schema> {
 
       if (beforeInsert != null) {
         beforeInsertHooks.push((r) => {
-          beforeInsert!(r, tableName, columnName, columnSchema);
+          beforeInsert!(r, columnName, columnSchema, tableName);
         });
       }
     }
@@ -1845,7 +1825,9 @@ export class SqliteDatastore<TSchema extends Schema> {
           throw new InvalidSchemaError(`Invalid beforeUpdate hook`);
         }
 
-        columnSchema.beforeUpdate(values, tableName, columnName, columnSchema);
+        const beforeUpdate = columnSchema.beforeUpdate as BeforeUpdateHook;
+        beforeUpdate(values, columnName, columnSchema, String(tableName));
+
         return;
       }
 
@@ -1854,9 +1836,9 @@ export class SqliteDatastore<TSchema extends Schema> {
       if (hasCustomSerialization) {
         this.defaultBeforeUpdate(
           values,
-          String(tableName),
           columnName,
           columnSchema,
+          String(tableName),
         );
       }
     });
