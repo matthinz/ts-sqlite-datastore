@@ -157,4 +157,51 @@ describe("#insert", () => {
       }),
     );
   });
+
+  describe("with a column that has a default value", () => {
+    const SCHEMA = {
+      tables: {
+        people: {
+          columns: {
+            id: {
+              type: "INTEGER",
+              autoIncrement: true,
+            },
+            name: { type: "TEXT", defaultValue: "John Doe" },
+          },
+          primaryKey: "id",
+        },
+      },
+    };
+
+    describe("when value is not specified", () => {
+      it(
+        "uses the default",
+        testWithSchema(SCHEMA, async (dataStore, db) => {
+          await dataStore.insert("people", {});
+
+          const records = await dataStore.select("people");
+
+          expect(records).toHaveLength(1);
+          expect(records[0]).toHaveProperty("name");
+          expect(records[0].name).toEqual("John Doe");
+        }),
+      );
+    });
+
+    describe("when value is specified", () => {
+      it(
+        "uses the specified value",
+        testWithSchema(SCHEMA, async (dataStore, db) => {
+          await dataStore.insert("people", { name: "Jane Doe" });
+
+          const records = await dataStore.select("people");
+
+          expect(records).toHaveLength(1);
+          expect(records[0]).toHaveProperty("name");
+          expect(records[0].name).toEqual("Jane Doe");
+        }),
+      );
+    });
+  });
 });

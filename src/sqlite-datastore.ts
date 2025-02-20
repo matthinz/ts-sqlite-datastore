@@ -1608,7 +1608,13 @@ export class SqliteDatastore<TSchema extends Schema> {
     columnName: string,
     columnSchema: ColumnSchema,
   ) {
-    const value = record[columnName];
+    let value = record[columnName];
+
+    if (value == null) {
+      if (typeof columnSchema === "object" && "defaultValue" in columnSchema) {
+        value = record[columnName] = columnSchema.defaultValue;
+      }
+    }
 
     const serialize =
       typeof columnSchema === "object" &&
@@ -1884,7 +1890,9 @@ export class SqliteDatastore<TSchema extends Schema> {
     // defaultBeforeInsertHook. However, if there are no features of this
     // column that would _require_ a beforeInsert hook, we can skip it.
 
-    const hasDefaultValue = false; // TODO
+    const hasDefaultValue =
+      "defaultValue" in resolvedColumnSchema &&
+      resolvedColumnSchema.defaultValue != null;
     const hasCustomSerialization =
       typeof resolvedColumnSchema === "object" &&
       "serialize" in resolvedColumnSchema;
