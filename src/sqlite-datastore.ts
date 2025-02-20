@@ -841,7 +841,7 @@ export type DeleteOptions<
 > = {
   table: TableName;
 } & (
-  | { where?: Criteria<TSchema["tables"][TableName]> }
+  | { where: Criteria<TSchema["tables"][TableName]> }
   | {
       all: true;
     }

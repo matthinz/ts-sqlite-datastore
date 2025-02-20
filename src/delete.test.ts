@@ -21,7 +21,7 @@ const TEST_SCHEMA = {
 } satisfies Schema;
 
 describe("#delete", () => {
-  describe("delete all records in a table", () => {
+  describe("with { all: true }", () => {
     it(
       "deletes all records",
       testWithSchema(TEST_SCHEMA, async (dataStore, db) => {
@@ -37,7 +37,7 @@ describe("#delete", () => {
     );
   });
 
-  describe("delete only some records in a table", () => {
+  describe("with { where: ... }", () => {
     it(
       "deletes all records",
       testWithSchema(TEST_SCHEMA, async (dataStore, db) => {
