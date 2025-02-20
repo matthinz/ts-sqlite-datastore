@@ -88,9 +88,9 @@ For convenience, we also allow certain special "custom" types.
 
 | Type | Description |
 | -- | -- |
-| "uuid" | A universally-unique identifier, stored as a `TEXT` column with `UNIQUE` and `NOT NULL` constraints by default. |
-| "insert_timestamp" | A timestamp that is automatically set to the current time when a record is inserted. Stored as a `TEXT` column with a `NOT NULL` constraint. |
-| "update_timestamp" | A timestamp that is automatically set to the current time when a record is updated. Stored as a `TEXT` column with a `NOT NULL` constraint. |
+| `uuid` | A universally-unique identifier, stored as a `TEXT` column with `UNIQUE` and `NOT NULL` constraints by default. |
+| `insert_timestamp` | A timestamp that is automatically set to the current time when a record is inserted. Stored as a `TEXT` column with a `NOT NULL` constraint. |
+| `update_timestamp` | A timestamp that is automatically set to the current time when a record is updated. Stored as a `TEXT` column with a `NOT NULL` constraint. |
 
 */
 
