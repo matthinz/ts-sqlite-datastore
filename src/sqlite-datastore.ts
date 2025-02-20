@@ -12,6 +12,8 @@ Version: 0.0.1
 This is a single file, Promise-oriented API for working with a local sqlite
 database in Node.js.
 
+It is a work in progress.
+
 */
 
 /*
