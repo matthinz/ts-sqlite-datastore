@@ -1,5 +1,5 @@
 import { InsertError, Schema, UpdateError } from "../sqlite-datastore";
-import { testWithSchema } from "../test-utils";
+import { all, testWithSchema } from "../test-utils";
 
 const SCHEMA = {
   tables: {
@@ -18,6 +18,27 @@ const SCHEMA = {
 } satisfies Schema;
 
 describe("insert_timestamp custom type", () => {
+  describe("schema", () => {
+    it(
+      "creates column with TEXT type",
+      testWithSchema(SCHEMA, async (dataStore, db) => {
+        await dataStore.migrate();
+
+        const columns = await all(db, `PRAGMA table_info(people)`);
+        const col = columns.find((c) => (c as any).name === "created_at");
+
+        expect(col).toEqual({
+          cid: 2,
+          name: "created_at",
+          type: "TEXT",
+          notnull: 1,
+          dflt_value: null,
+          pk: 0,
+        });
+      }),
+    );
+  });
+
   describe("on insert", () => {
     describe("when no value provided for created_at", () => {
       it(

@@ -1535,16 +1535,10 @@ export class SqliteDatastore<TSchema extends Schema> {
 
     const columnDefinitions = columnNames.map((columnName) => {
       const columnNameAsString = String(columnName);
-      const rawColumnSchema = tableSchema.columns[columnNameAsString]!;
 
-      const columnSchema =
-        typeof rawColumnSchema === "string"
-          ? { type: rawColumnSchema }
-          : rawColumnSchema;
-
-      if (typeof columnSchema === "number") {
-        throw new Error("TODO: Find out why this could possibly be a number");
-      }
+      const columnSchema = this.resolveColumnSchema(
+        tableSchema.columns[columnNameAsString]!,
+      );
 
       const { type } = columnSchema;
 
@@ -1570,7 +1564,7 @@ export class SqliteDatastore<TSchema extends Schema> {
         );
       }
 
-      return [
+      const sql = [
         `"${columnNameAsString}"`,
         type,
         isPrimaryKey && "PRIMARY KEY",
@@ -1580,6 +1574,8 @@ export class SqliteDatastore<TSchema extends Schema> {
       ]
         .filter(Boolean)
         .join(" ");
+
+      return sql;
     });
 
     const sql = [
@@ -1914,6 +1910,7 @@ export class SqliteDatastore<TSchema extends Schema> {
       return columnSchema;
     }
 
+    // TODO: Better error with table + column names
     throw new InvalidSchemaError(`Invalid column type: ${columnSchema}`);
   }
 

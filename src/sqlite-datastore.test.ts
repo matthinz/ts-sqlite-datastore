@@ -117,9 +117,7 @@ describe("SqliteDatastore", () => {
         "throws an Error",
         testWithSchema(SCHEMA, async (dataStore) => {
           await expect(dataStore.migrate()).rejects.toThrow(
-            new InvalidSchemaError(
-              "Invalid type 'INVALID' for column 'name' in table 'people'",
-            ),
+            new InvalidSchemaError("Invalid column type: INVALID"),
           );
         }),
       );
