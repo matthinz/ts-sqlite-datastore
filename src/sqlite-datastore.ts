@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { Database, Statement } from "sqlite3";
+import sqlite3, { Database, Statement } from "sqlite3";
 
 /*
 
@@ -601,6 +601,11 @@ export type SqliteDatastoreOptions<TSchema extends Schema> = {
    * If not provided, an in-memory database will be used.
    */
   filename?: string;
+
+  /**
+   * If specified, turns on verbose mode for the sqlite3 library.
+   */
+  verbose?: boolean;
 };
 
 /*
@@ -993,10 +998,16 @@ export class SqliteDatastore<TSchema extends Schema> {
   readonly #databasePromise: Promise<Database>;
   #migrated: boolean = false;
 
-  constructor({ schema, filename, ...rest }: SqliteDatastoreOptions<TSchema>) {
+  constructor({
+    schema,
+    filename,
+    verbose,
+    ...rest
+  }: SqliteDatastoreOptions<TSchema>) {
     this.#filename = filename ?? ":memory:";
     this.#schema = schema;
     this.#databasePromise = new Promise((resolve, reject) => {
+      const Database = verbose ? sqlite3.verbose().Database : sqlite3.Database;
       const db = new Database(this.#filename, (err) => {
         const onDatabaseReady = (err: Error | null, db?: Database) => {
           if (
@@ -1083,28 +1094,27 @@ export class SqliteDatastore<TSchema extends Schema> {
       params.push(...whereParams);
     }
 
-    return Promise.all([
-      this.migrateIfNeeded(),
-      this.prepare(sql.join(" "), params),
-    ]).then(
-      ([_, statement]) =>
-        new Promise<number>((resolve, reject) => {
-          statement.get((err, row) => {
-            if (err) {
-              statement.finalize(() => reject(err));
-              return;
-            }
-
-            statement.finalize((err) => {
+    return this.migrateIfNeeded()
+      .then(() => this.prepare(sql.join(" "), params))
+      .then(
+        (statement) =>
+          new Promise<number>((resolve, reject) => {
+            statement.get((err, row) => {
               if (err) {
-                reject(err);
+                statement.finalize(() => reject(err));
                 return;
               }
-              resolve(Number((row as any)["COUNT(*)"]));
+
+              statement.finalize((err) => {
+                if (err) {
+                  reject(err);
+                  return;
+                }
+                resolve(Number((row as any)["COUNT(*)"]));
+              });
             });
-          });
-        }),
-    );
+          }),
+      );
   }
 
   delete<TableName extends TableNames<TSchema>>(
@@ -1721,12 +1731,13 @@ export class SqliteDatastore<TSchema extends Schema> {
   }
 
   protected prepare(sql: string, params?: unknown[]): Promise<Statement> {
+    const _self = this;
     return this.#databasePromise.then(
       (db) =>
         new Promise((resolve, reject) => {
           db.prepare(sql, params, function (err) {
             if (err) {
-              reject(err);
+              reject(_self.adaptSqliteError(err, sql));
               return;
             }
             resolve(this);
