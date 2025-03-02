@@ -705,25 +705,28 @@ export type SelectOptions<
 };
 
 export type GreaterThanComparison<Table extends TableSchema<string>> = {
-  gt: Table["columns"] | number;
+  gt: Table["columns"] | number | bigint;
 };
 
 export type GreaterThanOrEqualToComparison<Table extends TableSchema<string>> =
   {
-    gte: Table["columns"] | number;
+    gte: Table["columns"] | number | bigint;
   };
 
 export type LessThanComparison<Table extends TableSchema<string>> = {
-  lt: Table["columns"] | number;
+  lt: Table["columns"] | number | bigint;
 };
 
 export type LessThanOrEqualToComparison<Table extends TableSchema<string>> = {
-  eq: Table["columns"] | number;
+  eq: Table["columns"] | number | bigint;
 };
 
 type CriteriaValuesForNumbers<Table extends TableSchema<string>> =
   | number
   | number[]
+  | bigint
+  | bigint[]
+  | (number | bigint)[]
   | undefined
   | null
   | GreaterThanComparison<Table>

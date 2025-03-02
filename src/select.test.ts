@@ -128,6 +128,38 @@ describe("#select", () => {
     );
   });
 
+  describe("select with criteria using non-nullable INTEGER column", () => {
+    const SCHEMA = {
+      tables: {
+        people: {
+          columns: {
+            id: {
+              type: "INTEGER",
+              autoIncrement: true,
+            },
+            name: "TEXT",
+            age: "INTEGER",
+          },
+          primaryKey: "id",
+        },
+      },
+    } satisfies Schema;
+
+    it(
+      "selects records that match the condition",
+      testWithSchema(SCHEMA, async (dataStore, db) => {
+        await dataStore.insert("people", { name: "foo", age: 20 });
+        await dataStore.insert("people", { name: "bar", age: 30 });
+
+        const records = await dataStore.select("people", {
+          where: { age: 20 as number | bigint },
+        });
+
+        expect(records).toEqual([{ id: 1, name: "foo", age: 20 }]);
+      }),
+    );
+  });
+
   describe("with custom parser on column", () => {
     const SCHEMA = {
       tables: {
