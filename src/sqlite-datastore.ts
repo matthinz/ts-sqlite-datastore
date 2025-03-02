@@ -721,6 +721,10 @@ export type LessThanOrEqualToComparison<Table extends TableSchema<string>> = {
   eq: Table["columns"] | number | bigint;
 };
 
+export type LikeComparison<Table extends TableSchema<string>> = {
+  like: Table["columns"] | string;
+};
+
 type CriteriaValuesForNumbers<Table extends TableSchema<string>> =
   | number
   | number[]
@@ -729,6 +733,7 @@ type CriteriaValuesForNumbers<Table extends TableSchema<string>> =
   | (number | bigint)[]
   | undefined
   | null
+  | LikeComparison<Table>
   | GreaterThanComparison<Table>
   | GreaterThanOrEqualToComparison<Table>
   | LessThanComparison<Table>
@@ -1500,6 +1505,11 @@ export class SqliteDatastore<TSchema extends Schema> {
             if ("lte" in value) {
               sql.push(`"${columnName}" <= ?`);
               params.push(value.lte);
+            }
+
+            if ("like" in value) {
+              sql.push(`("${columnName}" LIKE ?)`);
+              params.push(value.like);
             }
           } else if (value == null) {
             sql.push(`("${columnName}" IS NULL)`);
