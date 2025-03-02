@@ -736,7 +736,10 @@ export type ValueForCriteria<
   Table extends TableSchema<string>,
   ColumnName extends ColumnNames<Table>,
 > =
-  JsTypeForColumnSchema<Table["columns"][ColumnName]> extends string
+  JsTypeForColumnSchema<Table["columns"][ColumnName]> extends
+    | string
+    | null
+    | undefined
     ? /* string */ string | string[] | undefined | null
     : JsTypeForColumnSchema<Table["columns"][ColumnName]> extends
           | number
@@ -1507,7 +1510,7 @@ export class SqliteDatastore<TSchema extends Schema> {
         [[], []],
       );
 
-      return [sql.join(" AND `"), params];
+      return [sql.join(" AND "), params];
     }
   }
 

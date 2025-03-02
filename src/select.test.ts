@@ -99,6 +99,35 @@ describe("#select", () => {
     describe("array of values", () => {});
   });
 
+  describe("select with multiple criteria", () => {
+    it(
+      "selects records that match all conditions",
+
+      testWithSchema(TEST_SCHEMA, async (dataStore) => {
+        await dataStore.insert("people", {
+          name: "foo",
+          birthdate: "2000-01-01",
+        });
+        await dataStore.insert("people", {
+          name: "bar",
+          birthdate: "2000-01-01",
+        });
+        await dataStore.insert("people", {
+          name: "baz",
+          birthdate: "2000-01-02",
+        });
+
+        const records = await dataStore.select("people", {
+          where: { name: "foo", birthdate: "2000-01-01" },
+        });
+
+        expect(records).toEqual([
+          { id: 1, name: "foo", birthdate: "2000-01-01" },
+        ]);
+      }),
+    );
+  });
+
   describe("with custom parser on column", () => {
     const SCHEMA = {
       tables: {
