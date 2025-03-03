@@ -180,6 +180,43 @@ describe("#select", () => {
     );
   });
 
+  describe("select with eq operator", () => {
+    it(
+      "selects records that match the condition",
+      testWithSchema(TEST_SCHEMA, async (dataStore, db) => {
+        await dataStore.insert("people", { name: "foo" });
+        await dataStore.insert("people", { name: "bar" });
+        await dataStore.insert("people", { name: "baz" });
+
+        const records = await dataStore.select("people", {
+          where: { name: { eq: "foo" } },
+        });
+
+        expect(records).toEqual([{ id: 1, name: "foo", birthdate: null }]);
+      }),
+    );
+  });
+
+  describe("select with neq operator", () => {
+    it(
+      "selects records that match the condition",
+      testWithSchema(TEST_SCHEMA, async (dataStore, db) => {
+        await dataStore.insert("people", { name: "foo" });
+        await dataStore.insert("people", { name: "bar" });
+        await dataStore.insert("people", { name: "baz" });
+
+        const records = await dataStore.select("people", {
+          where: { name: { neq: "foo" } },
+        });
+
+        expect(records).toEqual([
+          { id: 2, name: "bar", birthdate: null },
+          { id: 3, name: "baz", birthdate: null },
+        ]);
+      }),
+    );
+  });
+
   describe("with custom parser on column", () => {
     const SCHEMA = {
       tables: {

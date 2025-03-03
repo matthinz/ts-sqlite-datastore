@@ -709,6 +709,14 @@ export type SelectOptions<
   where: Criteria<TSchema["tables"][TableName]>;
 };
 
+export type EqualToComparison<Table extends TableSchema<string>> = {
+  eq: Table["columns"] | string | number | bigint;
+};
+
+export type NotEqualToComparison<Table extends TableSchema<string>> = {
+  neq: Table["columns"] | string | number | bigint;
+};
+
 export type GreaterThanComparison<Table extends TableSchema<string>> = {
   gt: Table["columns"] | number | bigint;
 };
@@ -738,6 +746,8 @@ type CriteriaValuesForNumbers<Table extends TableSchema<string>> =
   | (number | bigint)[]
   | undefined
   | null
+  | EqualToComparison<Table>
+  | NotEqualToComparison<Table>
   | LikeComparison<Table>
   | GreaterThanComparison<Table>
   | GreaterThanOrEqualToComparison<Table>
@@ -1485,6 +1495,16 @@ export class SqliteDatastore<TSchema extends Schema> {
         return ["", []];
       }
 
+      const OPERATOR_MAP = {
+        eq: "=",
+        neq: "!=",
+        gt: ">",
+        gte: ">=",
+        lt: "<",
+        lte: "<=",
+        like: "LIKE",
+      };
+
       const [sql, params] = Object.entries(criteria).reduce<
         [string[], unknown[]]
       >(
@@ -1496,33 +1516,15 @@ export class SqliteDatastore<TSchema extends Schema> {
               params.push(v);
             });
             sql.push(`("${columnName}" IN (${placeholders.join(",")}))`);
-          } else if (typeof value === "object") {
-            if ("gt" in value) {
-              params.push(value.gt);
-              sql.push(`"${columnName}" > ?`);
-            }
-
-            if ("gte" in value) {
-              sql.push(`"${columnName}" >= ?`);
-              params.push(value.gte);
-            }
-
-            if ("lt" in value) {
-              sql.push(`"${columnName}" < ?`);
-              params.push(value.lt);
-            }
-
-            if ("lte" in value) {
-              sql.push(`"${columnName}" <= ?`);
-              params.push(value.lte);
-            }
-
-            if ("like" in value) {
-              sql.push(`("${columnName}" LIKE ?)`);
-              params.push(value.like);
-            }
           } else if (value == null) {
             sql.push(`("${columnName}" IS NULL)`);
+          } else if (typeof value === "object") {
+            Object.entries(OPERATOR_MAP).forEach(([operator, sqlOperator]) => {
+              if (operator in value) {
+                sql.push(`("${columnName}" ${sqlOperator} ?)`);
+                params.push(value[operator]);
+              }
+            });
           } else {
             sql.push(`("${columnName}" = ?)`);
             params.push(value);
