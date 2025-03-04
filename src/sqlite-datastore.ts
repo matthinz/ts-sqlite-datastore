@@ -451,10 +451,7 @@ export type JsTypeForColumnSchema<
         : // We've been given an invalid schema
           never;
 
-export type TableSchema<
-  ColumnNames extends string,
-  PrimaryKeyColumnNames extends ColumnNames,
-> = {
+export type TableSchema<ColumnNames extends string> = {
   columns: {
     [columnName in ColumnNames]:
       | AutoIncrementableColumnSchema
@@ -463,10 +460,10 @@ export type TableSchema<
       | CustomTypeName
       | SqliteNativeType;
   };
-  primaryKey?: PrimaryKeyColumnNames | PrimaryKeyColumnNames[];
+  primaryKey?: ColumnNames | ColumnNames[];
 };
 
-export type ColumnNames<Table extends TableSchema<string, string>> =
+export type ColumnNames<Table extends TableSchema<string>> =
   keyof Table["columns"];
 
 /**
@@ -494,7 +491,7 @@ type IsNullable<
           : never;
 
 type MapWhereNullableColumnsHaveColumnNameAsValue<
-  T extends TableSchema<string, string>,
+  T extends TableSchema<string>,
 > = {
   [columnName in keyof T["columns"]]: IsNullable<
     T["columns"][columnName]
@@ -506,11 +503,11 @@ type MapWhereNullableColumnsHaveColumnNameAsValue<
 /**
  * Extract only the nullable column names from a TableSchema.
  */
-type NullableColumnNames<T extends TableSchema<string, string>> =
+type NullableColumnNames<T extends TableSchema<string>> =
   MapWhereNullableColumnsHaveColumnNameAsValue<T>[keyof T["columns"]];
 
 type MapWhereColumnsWithDefaultValueHaveColumnNameAsValue<
-  T extends TableSchema<string, string>,
+  T extends TableSchema<string>,
 > = {
   [columnName in keyof T["columns"]]: T["columns"][columnName] extends {
     defaultValue: void;
@@ -524,10 +521,10 @@ type MapWhereColumnsWithDefaultValueHaveColumnNameAsValue<
 /**
  * Extract only the names of columns that have default values set
  */
-type NamesOfColumnsWithDefaultValues<T extends TableSchema<string, string>> =
+type NamesOfColumnsWithDefaultValues<T extends TableSchema<string>> =
   MapWhereColumnsWithDefaultValueHaveColumnNameAsValue<T>[keyof T["columns"]];
 
-type PrimaryKeyColumnsNames<T extends TableSchema<string, string>> =
+type PrimaryKeyColumnsNames<T extends TableSchema<string>> =
   T["primaryKey"] extends string
     ? T["primaryKey"]
     : T["primaryKey"] extends string[]
@@ -545,7 +542,7 @@ To derive a Javascript type for a record in a table, you can use
  * The "raw" record is what is actually returned from the database, before
  * we've done any parsing.
  */
-export type RawRecordFor<Table extends TableSchema<string, string>> = {
+export type RawRecordFor<Table extends TableSchema<string>> = {
   [columnName in keyof Table["columns"]]: IsNullable<
     Table["columns"][columnName]
   > extends true
@@ -553,7 +550,7 @@ export type RawRecordFor<Table extends TableSchema<string, string>> = {
     : JsTypeFor<SqliteNativeTypeFor<Table["columns"][columnName]>, false>;
 };
 
-export type RecordFor<Table extends TableSchema<string, string>> = {
+export type RecordFor<Table extends TableSchema<string>> = {
   [columnName in keyof Table["columns"]]: Table["columns"][columnName] extends SqliteNativeType
     ? JsTypeForSqliteNativeType<Table["columns"][columnName], false>
     : JsTypeForColumnSchema<Table["columns"][columnName]>;
@@ -564,7 +561,7 @@ export type RecordFor<Table extends TableSchema<string, string>> = {
  * on insert. InsertRecordFor<T> returns a Record type for the given table, with
  * all columns that have default values marked as Optional.
  */
-export type InsertRecordFor<T extends TableSchema<string, string>> = Omit<
+export type InsertRecordFor<T extends TableSchema<string>> = Omit<
   MakeOptional<
     RecordFor<T>,
     NullableColumnNames<T> | NamesOfColumnsWithDefaultValues<T>
@@ -574,7 +571,7 @@ export type InsertRecordFor<T extends TableSchema<string, string>> = Omit<
 
 export type Schema = {
   tables: {
-    [tableName: string]: TableSchema<string, string>;
+    [tableName: string]: TableSchema<string>;
   };
 };
 
@@ -656,7 +653,7 @@ type InsertResultWithoutIds = {
 };
 
 // Build a map of column names to whether they auto-increment
-type AutoIncrementingColumnMap<T extends TableSchema<string, string>> = {
+type AutoIncrementingColumnMap<T extends TableSchema<string>> = {
   [columnName in keyof T["columns"]]: T["columns"][columnName] extends {
     autoIncrement: true;
   }
@@ -667,7 +664,7 @@ type AutoIncrementingColumnMap<T extends TableSchema<string, string>> = {
 };
 
 // Return whether a given table has an auto-incrementing column
-type HasAutoIncrementingColumn<T extends TableSchema<string, string>> =
+type HasAutoIncrementingColumn<T extends TableSchema<string>> =
   AutoIncrementingColumnMap<T>[keyof T["columns"]] extends false
     ? // false means no column auto-increments
       false
@@ -712,39 +709,36 @@ export type SelectOptions<
   where: Criteria<TSchema["tables"][TableName]>;
 };
 
-export type EqualToComparison<Table extends TableSchema<string, string>> = {
+export type EqualToComparison<Table extends TableSchema<string>> = {
   eq: Table["columns"] | string | number | bigint;
 };
 
-export type NotEqualToComparison<Table extends TableSchema<string, string>> = {
+export type NotEqualToComparison<Table extends TableSchema<string>> = {
   neq: Table["columns"] | string | number | bigint;
 };
 
-export type GreaterThanComparison<Table extends TableSchema<string, string>> = {
+export type GreaterThanComparison<Table extends TableSchema<string>> = {
   gt: Table["columns"] | number | bigint;
 };
 
-export type GreaterThanOrEqualToComparison<
-  Table extends TableSchema<string, string>,
-> = {
-  gte: Table["columns"] | number | bigint;
-};
+export type GreaterThanOrEqualToComparison<Table extends TableSchema<string>> =
+  {
+    gte: Table["columns"] | number | bigint;
+  };
 
-export type LessThanComparison<Table extends TableSchema<string, string>> = {
+export type LessThanComparison<Table extends TableSchema<string>> = {
   lt: Table["columns"] | number | bigint;
 };
 
-export type LessThanOrEqualToComparison<
-  Table extends TableSchema<string, string>,
-> = {
+export type LessThanOrEqualToComparison<Table extends TableSchema<string>> = {
   eq: Table["columns"] | number | bigint;
 };
 
-export type LikeComparison<Table extends TableSchema<string, string>> = {
+export type LikeComparison<Table extends TableSchema<string>> = {
   like: Table["columns"] | string;
 };
 
-type CriteriaValuesForNumbers<Table extends TableSchema<string, string>> =
+type CriteriaValuesForNumbers<Table extends TableSchema<string>> =
   | number
   | number[]
   | bigint
@@ -762,7 +756,7 @@ type CriteriaValuesForNumbers<Table extends TableSchema<string, string>> =
 
 // Track what kinds of values we accept for a column-based criteria
 export type ValueForCriteria<
-  Table extends TableSchema<string, string>,
+  Table extends TableSchema<string>,
   ColumnName extends ColumnNames<Table>,
 > =
   JsTypeForColumnSchema<Table["columns"][ColumnName]> extends
@@ -784,7 +778,7 @@ export type ValueForCriteria<
         ? CriteriaValuesForNumbers<Table>
         : never;
 
-export type Criteria<Table extends TableSchema<string, string>> = {
+export type Criteria<Table extends TableSchema<string>> = {
   [columnName in ColumnNames<Table>]?: ValueForCriteria<Table, columnName>;
 };
 
@@ -1483,7 +1477,7 @@ export class SqliteDatastore<TSchema extends Schema> {
     });
   }
 
-  protected buildWhereClause<Table extends TableSchema<string, string>>(
+  protected buildWhereClause<Table extends TableSchema<string>>(
     where: Criteria<Table> | undefined,
   ): [string, unknown[]] {
     const [criteriaSql, params] = buildCriteriaSql(where);
@@ -1545,9 +1539,9 @@ export class SqliteDatastore<TSchema extends Schema> {
     }
   }
 
-  protected createTable<Table extends TableSchema<string, string>>(
+  protected createTable<Table extends TableSchema<string>>(
     tableName: string,
-    tableSchema: TableSchema<string, string>,
+    tableSchema: TableSchema<string>,
   ): Promise<void> {
     const columnNames: ColumnNames<Table>[] = Object.keys(tableSchema.columns);
 
@@ -1708,7 +1702,7 @@ export class SqliteDatastore<TSchema extends Schema> {
     });
   }
 
-  protected parseRow<Table extends TableSchema<string, string>>(
+  protected parseRow<Table extends TableSchema<string>>(
     tableSchema: Table,
     row: RawRecordFor<Table>,
   ): RecordFor<Table> {
@@ -1762,7 +1756,7 @@ export class SqliteDatastore<TSchema extends Schema> {
    * @param tableSchema
    * @param records
    */
-  private getRecordsForInsert<Table extends TableSchema<string, string>>(
+  private getRecordsForInsert<Table extends TableSchema<string>>(
     tableName: string,
     tableSchema: Table,
     records: InsertRecordFor<Table>[],
