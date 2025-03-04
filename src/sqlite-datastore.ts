@@ -464,7 +464,7 @@ export type TableSchema<ColumnNames extends string> = {
 };
 
 export type ColumnNames<Table extends TableSchema<string>> =
-  keyof Table["columns"];
+  keyof Table["columns"] & string;
 
 /**
  * Make some keys in T optional.
@@ -578,7 +578,8 @@ export type Schema = {
 /**
  * Returns the set of table names defined in a Schema.
  */
-export type TableNames<TSchema extends Schema> = keyof TSchema["tables"];
+export type TableNames<TSchema extends Schema> = keyof TSchema["tables"] &
+  string;
 
 /*
 
@@ -1092,7 +1093,7 @@ export class SqliteDatastore<TSchema extends Schema> {
           : ({ table: tableNameOrOptions } as O)
         : (tableNameOrOptions as O);
 
-    const tableName = String(options.table);
+    const tableName = options.table;
 
     const sql = [`SELECT COUNT(*) FROM "${tableName}"`];
     const params: unknown[] = [];
@@ -1140,7 +1141,7 @@ export class SqliteDatastore<TSchema extends Schema> {
         ? { ...mayBeOptions, table: tableNameOrOptions }
         : (tableNameOrOptions as DeleteOptions<TSchema, TableName>);
 
-    const tableName = String(options.table);
+    const tableName = options.table;
     const sql = [`DELETE FROM "${tableName}"`];
     const params: unknown[] = [];
 
@@ -1217,7 +1218,7 @@ export class SqliteDatastore<TSchema extends Schema> {
         : (tableNameOrInsertOptions as InsertOptions<TSchema, TableName>);
 
     const { records } = options;
-    const tableName = String(options.table);
+    const tableName = options.table;
     const tableSchema = this.#schema["tables"][
       tableName
     ] as TSchema["tables"][TableName];
@@ -1308,7 +1309,7 @@ export class SqliteDatastore<TSchema extends Schema> {
           : ({ table: tableNameOrOptions } as O)
         : (tableNameOrOptions as O);
 
-    const tableName = String(options.table);
+    const tableName = options.table;
     const tableSchema = this.#schema["tables"][
       tableName
     ] as TSchema["tables"][TableName];
@@ -1417,7 +1418,7 @@ export class SqliteDatastore<TSchema extends Schema> {
             : { ...maybeOptionsOrRecords, table: optionsOrTableName }
           : (optionsOrTableName as UpdateOptions<TSchema, TableName>);
 
-      const tableName = String(options.table) as TableName;
+      const tableName = options.table;
 
       const tableSchema = this.#schema["tables"][
         tableName as string
@@ -1441,7 +1442,7 @@ export class SqliteDatastore<TSchema extends Schema> {
         set,
       );
 
-      const sqlClauses = [`UPDATE "${String(tableName)}" SET `];
+      const sqlClauses = [`UPDATE "${tableName}" SET `];
       const params: unknown[] = [];
 
       Object.entries(valuesForUpdate).forEach(([columnName, value]) => {
@@ -1522,7 +1523,7 @@ export class SqliteDatastore<TSchema extends Schema> {
             Object.entries(OPERATOR_MAP).forEach(([operator, sqlOperator]) => {
               if (operator in value) {
                 sql.push(`("${columnName}" ${sqlOperator} ?)`);
-                params.push(value[operator]);
+                params.push((value as any)[operator]);
               }
             });
           } else {
@@ -1546,24 +1547,22 @@ export class SqliteDatastore<TSchema extends Schema> {
     const columnNames: ColumnNames<Table>[] = Object.keys(tableSchema.columns);
 
     const columnDefinitions = columnNames.map((columnName) => {
-      const columnNameAsString = String(columnName);
-
       const columnSchema = this.resolveColumnSchema(
-        tableSchema.columns[columnNameAsString]!,
+        tableSchema.columns[columnName]!,
       );
 
       const { type } = columnSchema;
 
       if (!this.isValidColumnType(type)) {
         throw new InvalidSchemaError(
-          `Invalid type '${type}' for column '${columnNameAsString}' in table '${tableName}'`,
+          `Invalid type '${type}' for column '${columnName}' in table '${tableName}'`,
         );
       }
 
       const isPrimaryKey = Array.isArray(tableSchema.primaryKey)
-        ? tableSchema.primaryKey.includes(String(columnName))
+        ? tableSchema.primaryKey.includes(columnName)
         : tableSchema.primaryKey === columnName ||
-          (String(columnName) === "id" && !("primaryKey" in tableSchema));
+          (columnName === "id" && !("primaryKey" in tableSchema));
 
       const autoIncrement =
         "autoIncrement" in columnSchema && columnSchema.autoIncrement;
@@ -1572,12 +1571,12 @@ export class SqliteDatastore<TSchema extends Schema> {
 
       if (autoIncrement && !isPrimaryKey) {
         throw new InvalidSchemaError(
-          `Column '${columnNameAsString}' in table '${tableName}' is marked as auto-incrementing but is not part of the table's primary key.`,
+          `Column '${columnName}' in table '${tableName}' is marked as auto-incrementing but is not part of the table's primary key.`,
         );
       }
 
       const sql = [
-        `"${columnNameAsString}"`,
+        `"${columnName}"`,
         type,
         isPrimaryKey && "PRIMARY KEY",
         autoIncrement && "AUTOINCREMENT",
@@ -1851,7 +1850,7 @@ export class SqliteDatastore<TSchema extends Schema> {
         }
 
         const beforeUpdate = columnSchema.beforeUpdate as BeforeUpdateHook;
-        beforeUpdate(values, columnName, columnSchema, String(tableName));
+        beforeUpdate(values, columnName, columnSchema, tableName);
 
         return;
       }
@@ -1859,12 +1858,7 @@ export class SqliteDatastore<TSchema extends Schema> {
       const hasCustomSerialization = "serialize" in columnSchema;
 
       if (hasCustomSerialization) {
-        this.defaultBeforeUpdate(
-          values,
-          columnName,
-          columnSchema,
-          String(tableName),
-        );
+        this.defaultBeforeUpdate(values, columnName, columnSchema, tableName);
       }
     });
 
