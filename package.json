@@ -8,6 +8,9 @@
     "start": "node --enable-source-maps dist/index.js",
     "test": "jest"
   },
+  "engines": {
+    "node": ">=23.6.0"
+  },
   "jest": {
     "roots": [
       "dist"
@@ -24,5 +27,6 @@
   },
   "dependencies": {
     "sqlite3": "^5.1.7"
-  }
+  },
+  "private": true
 }
