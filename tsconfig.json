@@ -1,9 +1,15 @@
 {
-  "extends": "@tsconfig/recommended/tsconfig.json",
   "include": ["src/**/*.ts"],
+  "exclude": ["node_modules"],
   "compilerOptions": {
     "outDir": "dist",
     "sourceMap": true,
-    "declaration": true
+
+    // These are the compiler settings that map to how Node.js interprets TypeScript code.
+    "target": "esnext",
+    "module": "nodenext",
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "verbatimModuleSyntax": true
   }
 }

@@ -1,5 +1,6 @@
-import { InvalidUUIDError, Schema } from "../sqlite-datastore";
-import { all, testWithSchema } from "../test-utils";
+import type { Schema } from "../sqlite-datastore.ts";
+import { InvalidUUIDError } from "../sqlite-datastore.ts";
+import { all, testWithSchema } from "../test-utils.ts";
 
 const SCHEMA = {
   tables: {

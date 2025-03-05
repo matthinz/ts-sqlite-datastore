@@ -1,10 +1,9 @@
+import type { InsertRecordFor, Schema } from "./sqlite-datastore.ts";
 import {
   InsertError,
-  InsertRecordFor,
-  Schema,
   UniqueConstraintViolationError,
-} from "./sqlite-datastore";
-import { all, testWithSchema } from "./test-utils";
+} from "./sqlite-datastore.ts";
+import { all, testWithSchema } from "./test-utils.ts";
 
 const TEST_SCHEMA = {
   tables: {

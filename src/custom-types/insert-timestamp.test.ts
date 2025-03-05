@@ -1,5 +1,6 @@
-import { InsertError, Schema, UpdateError } from "../sqlite-datastore";
-import { all, testWithSchema } from "../test-utils";
+import type { Schema } from "../sqlite-datastore.ts";
+import { InsertError, UpdateError } from "../sqlite-datastore.ts";
+import { all, testWithSchema } from "../test-utils.ts";
 
 const SCHEMA = {
   tables: {

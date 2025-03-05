@@ -1,5 +1,6 @@
-import { NoSuchTableError, Schema } from "./sqlite-datastore";
-import { runSql, testWithSchema } from "./test-utils";
+import type { Schema } from "./sqlite-datastore.ts";
+import { NoSuchTableError } from "./sqlite-datastore.ts";
+import { runSql, testWithSchema } from "./test-utils.ts";
 
 const TEST_SCHEMA = {
   tables: {

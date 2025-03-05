@@ -945,8 +945,15 @@ export class InvalidUUIDError extends SqliteDatastoreError {
 }
 
 export class NoSuchTableError extends SqliteDatastoreError {
-  constructor(public readonly tableName: string) {
+  #tableName: string;
+
+  constructor(tableName: string) {
     super(`No such table: ${tableName}`, "NO_SUCH_TABLE");
+    this.#tableName = tableName;
+  }
+
+  get tableName(): string {
+    return this.#tableName;
   }
 }
 
@@ -968,26 +975,40 @@ export class SerializationError extends SqliteDatastoreError {
 }
 
 export class SyntaxError extends SqliteDatastoreError {
-  constructor(
-    message: string,
-    public readonly sql?: string,
-  ) {
+  #sql: string | undefined;
+
+  constructor(message: string, sql?: string) {
     if (sql != null) {
       message = `${message} (SQL: ${sql})`;
     }
     super(message, "SYNTAX_ERROR");
+    this.#sql = sql;
+  }
+
+  get sql(): string | undefined {
+    return this.#sql;
   }
 }
 
 export class UniqueConstraintViolationError extends SqliteDatastoreError {
-  constructor(
-    public readonly tableName: string,
-    public readonly columnName: string,
-  ) {
+  #tableName: string;
+  #columnName: string;
+
+  constructor(tableName: string, columnName: string) {
     super(
       `UNIQUE constraint violation: "${tableName}"."${columnName}"`,
       "UNIQUE_CONSTRAINT_VIOLATION",
     );
+    this.#tableName = tableName;
+    this.#columnName = columnName;
+  }
+
+  get columnName(): string {
+    return this.#columnName;
+  }
+
+  get tableName(): string {
+    return this.#tableName;
   }
 }
 

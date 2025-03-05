@@ -1,5 +1,5 @@
-import { Schema } from "./sqlite-datastore";
-import { createDataStore } from "./test-utils";
+import type { Schema } from "./sqlite-datastore.ts";
+import { createDataStore } from "./test-utils.ts";
 
 const TEST_SCHEMA = {
   tables: {

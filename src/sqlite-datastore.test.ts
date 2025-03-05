@@ -1,7 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { InvalidSchemaError, Schema } from "./sqlite-datastore";
-import { all, createDataStore, testWithSchema } from "./test-utils";
+import type { Schema } from "./sqlite-datastore.ts";
+import { InvalidSchemaError } from "./sqlite-datastore.ts";
+import { all, createDataStore, testWithSchema } from "./test-utils.ts";
 
 const TEST_SCHEMA = {
   tables: {

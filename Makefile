@@ -1,8 +1,8 @@
-SOURCES := $(shell find src -name '*.ts')
+SOURCES := $(shell find src -name '*.ts') tsconfig.json
 
 .PHONY: build test
 
-build: dist README.md
+build: dist
 
 test: build
 	@if [ "$(FILTER)" = "" ]; then \
@@ -18,6 +18,3 @@ dist: node_modules $(SOURCES)
 node_modules: package.json yarn.lock
 	yarn install
 	touch $@
-
-README.md: dist
-	node dist/tools/build-readme.js src/sqlite-datastore.ts > $@

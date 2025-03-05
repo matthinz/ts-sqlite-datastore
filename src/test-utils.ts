@@ -1,9 +1,6 @@
 import { Database } from "sqlite3";
-import {
-  Schema,
-  SqliteDatastore,
-  SqliteDatastoreOptions,
-} from "../sqlite-datastore";
+import type { Schema, SqliteDatastoreOptions } from "./sqlite-datastore.ts";
+import { SqliteDatastore } from "./sqlite-datastore.ts";
 
 export function all(
   db: Database,
