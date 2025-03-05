@@ -1,5 +1,5 @@
 {
-  "name": "sqlite-datastore",
+  "name": "ts-sqlite-datastore",
   "version": "0.0.1",
   "main": "src/index.ts",
   "license": "CC0-1.0",
