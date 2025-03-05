@@ -4,7 +4,7 @@
   "main": "dist/index.js",
   "license": "CC0-1.0",
   "scripts": {
-    "build": "rm -rf dist && tsc",
+    "build": "rm -rf dist && tsc --erasableSyntaxOnly",
     "start": "node --enable-source-maps dist/index.js",
     "test": "jest"
   },
@@ -19,11 +19,11 @@
   "devDependencies": {
     "@tsconfig/recommended": "^1.0.8",
     "@types/jest": "^29.5.14",
-    "@types/node": "^22.10.1",
+    "@types/node": "^22.13.9",
     "jest": "^29.7.0",
     "prettier": "^3.4.1",
     "prettier-plugin-organize-imports": "^4.1.0",
-    "typescript": "^5.7.2"
+    "typescript": "^5.8.2"
   },
   "dependencies": {
     "sqlite3": "^5.1.7"
