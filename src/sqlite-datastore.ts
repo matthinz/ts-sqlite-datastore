@@ -9,8 +9,7 @@ Version: 0.0.1
 
 [![Node.js CI](https://github.com/matthinz/ts-sqlite-datastore/actions/workflows/node.js.yml/badge.svg)](https://github.com/matthinz/ts-sqlite-datastore/actions/workflows/node.js.yml)
 
-This is a single file, Promise-oriented API for working with a local sqlite
-database in Node.js.
+This is a Promise-oriented API for working with a local sqlite database in Node.js.
 
 It is a work in progress.
 
