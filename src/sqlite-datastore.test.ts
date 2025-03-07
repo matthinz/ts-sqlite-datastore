@@ -1,5 +1,7 @@
+import assert from "node:assert";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { describe, it } from "node:test";
 import type { Schema } from "./sqlite-datastore.ts";
 import { InvalidSchemaError } from "./sqlite-datastore.ts";
 import { all, createDataStore, testWithSchema } from "./test-utils.ts";
@@ -28,7 +30,7 @@ describe("SqliteDatastore", () => {
     it(
       "uses an in-memory database by default",
       testWithSchema(TEST_SCHEMA, async (dataStore) => {
-        expect(dataStore.filename).toEqual(":memory:");
+        assert.equal(dataStore.filename, ":memory:");
       }),
     );
 
@@ -42,7 +44,7 @@ describe("SqliteDatastore", () => {
       });
 
       try {
-        expect(dataStore.filename).toEqual(filename);
+        assert.equal(dataStore.filename, filename);
       } finally {
         await fs.rm(dir, { recursive: true });
       }
@@ -68,7 +70,8 @@ describe("SqliteDatastore", () => {
           schema: SCHEMA,
         });
 
-        expect(dataStore.migrate()).rejects.toThrow(
+        await assert.rejects(
+          dataStore.migrate(),
           new InvalidSchemaError(
             "Column 'foo' in table 'people' is marked as auto-incrementing but is not part of the table's primary key.",
           ),
@@ -87,7 +90,7 @@ describe("SqliteDatastore", () => {
           db,
           "SELECT name FROM sqlite_master WHERE type='table';",
         );
-        expect(actual).toEqual([
+        assert.deepStrictEqual(actual, [
           { name: "people" },
           { name: "sqlite_sequence" },
         ]);
@@ -117,7 +120,8 @@ describe("SqliteDatastore", () => {
       it(
         "throws an Error",
         testWithSchema(SCHEMA, async (dataStore) => {
-          await expect(dataStore.migrate()).rejects.toThrow(
+          await assert.rejects(
+            dataStore.migrate(),
             new InvalidSchemaError("Invalid column type: INVALID"),
           );
         }),
@@ -143,7 +147,7 @@ describe("SqliteDatastore", () => {
 
           // assert that id is the primary key of the users table
           const actual = await all(db, "PRAGMA table_info(users);");
-          expect(actual).toEqual([
+          assert.deepStrictEqual(actual, [
             {
               cid: 0,
               name: "id",
@@ -181,7 +185,7 @@ describe("SqliteDatastore", () => {
             await dataStore.migrate();
 
             const actual = await all(db, "PRAGMA table_info(users);");
-            expect(actual).toEqual([
+            assert.deepStrictEqual(actual, [
               {
                 cid: 0,
                 name: "name",

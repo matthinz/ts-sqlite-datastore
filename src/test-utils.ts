@@ -1,9 +1,9 @@
-import { Database } from "sqlite3";
+import sqlite3 from "sqlite3";
 import type { Schema, SqliteDatastoreOptions } from "./sqlite-datastore.ts";
 import { SqliteDatastore } from "./sqlite-datastore.ts";
 
 export function all(
-  db: Database,
+  db: sqlite3.Database,
   sql: string,
   ...params: unknown[]
 ): Promise<unknown[]> {
@@ -20,11 +20,11 @@ export function all(
 
 export function createDataStore<TSchema extends Schema>(
   options: SqliteDatastoreOptions<TSchema>,
-): Promise<[SqliteDatastore<TSchema>, Database]> {
+): Promise<[SqliteDatastore<TSchema>, sqlite3.Database]> {
   return new Promise((resolve, reject) => {
     const dataStore = new SqliteDatastore({
       ...options,
-      onDatabaseReady(err: unknown, db?: Database) {
+      onDatabaseReady(err: unknown, db?: sqlite3.Database) {
         if (err) {
           reject(err);
           return;
@@ -36,7 +36,7 @@ export function createDataStore<TSchema extends Schema>(
 }
 
 export function runSql(
-  db: Database,
+  db: sqlite3.Database,
   sql: string,
   ...params: unknown[]
 ): Promise<void> {
@@ -53,7 +53,10 @@ export function runSql(
 
 export function testWithSchema<TSchema extends Schema>(
   schema: TSchema,
-  test: (dataStore: SqliteDatastore<TSchema>, db: Database) => Promise<void>,
+  test: (
+    dataStore: SqliteDatastore<TSchema>,
+    db: sqlite3.Database,
+  ) => Promise<void>,
 ): () => Promise<void> {
   return async () => {
     const [dataStore, db] = await createDataStore({

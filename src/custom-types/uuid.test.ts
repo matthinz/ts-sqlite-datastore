@@ -1,3 +1,5 @@
+import assert from "node:assert";
+import { describe, it } from "node:test";
 import type { Schema } from "../sqlite-datastore.ts";
 import { InvalidUUIDError } from "../sqlite-datastore.ts";
 import { all, testWithSchema } from "../test-utils.ts";
@@ -24,11 +26,12 @@ describe("uuid custom type", () => {
 
           const actual = await all(db, "SELECT * FROM people");
 
-          expect(actual).toHaveLength(1);
+          assert.equal(actual.length, 1);
 
           const { id } = actual[0] as any;
 
-          expect(id).toMatch(
+          assert.match(
+            id,
             /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
           );
         }),
@@ -46,7 +49,7 @@ describe("uuid custom type", () => {
 
           const actual = await all(db, "SELECT * FROM people");
 
-          expect(actual).toEqual([
+          assert.deepStrictEqual(actual, [
             {
               id: "EAAE1BB6-1AD8-4952-8AAA-C0AA5B60AEA0",
               name: "foo",
@@ -60,12 +63,13 @@ describe("uuid custom type", () => {
       it(
         "throws an InvalidUUIDError",
         testWithSchema(SCHEMA, async (dataStore, db) => {
-          await expect(
+          await assert.rejects(
             dataStore.insert("people", {
               id: "not a uuid",
               name: "foo",
             }),
-          ).rejects.toThrow(InvalidUUIDError);
+            InvalidUUIDError,
+          );
         }),
       );
     });
@@ -88,9 +92,8 @@ describe("uuid custom type", () => {
 
           const records = await dataStore.select("people");
 
-          expect(records).toHaveLength(1);
-          expect(records[0]).toHaveProperty("id");
-          expect(records[0].id).toEqual("EAAE1BB6-1AD8-4952-8AAA-C0AA5B60AEA0");
+          assert.equal(records.length, 1, "1 record found");
+          assert.equal(records[0].id, "EAAE1BB6-1AD8-4952-8AAA-C0AA5B60AEA0");
         }),
       );
     });
@@ -103,9 +106,10 @@ describe("uuid custom type", () => {
             name: "foo",
           });
 
-          await expect(
+          await assert.rejects(
             dataStore.update("people", { set: { id: "not a uuid" } }),
-          ).rejects.toThrow(InvalidUUIDError);
+            InvalidUUIDError,
+          );
         }),
       );
     });

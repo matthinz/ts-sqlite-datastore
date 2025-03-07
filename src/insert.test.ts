@@ -1,3 +1,5 @@
+import assert from "node:assert";
+import { describe, it } from "node:test";
 import type { InsertRecordFor, Schema } from "./sqlite-datastore.ts";
 import {
   InsertError,
@@ -34,13 +36,13 @@ describe("#insert", () => {
           birthdate: "2000-01-01",
         });
 
-        expect(result).toEqual({
+        assert.deepStrictEqual(result, {
           count: 1,
           ids: [1],
         });
 
         const records = await all(db, "SELECT * FROM people");
-        expect(records).toEqual([
+        assert.deepStrictEqual(records, [
           { id: 1, name: "Person A", birthdate: "2000-01-01" },
         ]);
       }),
@@ -51,13 +53,12 @@ describe("#insert", () => {
     it(
       "throws an Error",
       testWithSchema(TEST_SCHEMA, async (dataStore) => {
-        await expect(
+        await assert.rejects(
           dataStore.insert("people", {
             name: "Person A",
             birthdate: "2000-01-01",
             extra: "extra",
           } as InsertRecordFor<(typeof TEST_SCHEMA)["tables"]["people"]>),
-        ).rejects.toThrow(
           new InsertError("Column 'extra' not found on table 'people'"),
         );
       }),
@@ -73,13 +74,13 @@ describe("#insert", () => {
           { name: "bar", birthdate: "2000-01-01" },
         ]);
 
-        expect(result).toEqual({
+        assert.deepStrictEqual(result, {
           count: 2,
           ids: [1, 2],
         });
 
         const records = await all(db, "SELECT * FROM people");
-        expect(records).toEqual([
+        assert.deepStrictEqual(records, [
           { id: 1, name: "foo", birthdate: null },
           { id: 2, name: "bar", birthdate: "2000-01-01" },
         ]);
@@ -118,7 +119,7 @@ describe("#insert", () => {
 
         const actual = await all(db, "SELECT * FROM events");
 
-        expect(actual).toEqual([
+        assert.deepStrictEqual(actual, [
           {
             id: 1,
             name: "Birthday party",
@@ -150,9 +151,10 @@ describe("#insert", () => {
       testWithSchema(SCHEMA, async (dataStore) => {
         await dataStore.insert("people", { name: "foo" });
 
-        await expect(
+        await assert.rejects(
           dataStore.insert("people", { name: "foo" }),
-        ).rejects.toThrow(new UniqueConstraintViolationError("people", "name"));
+          new UniqueConstraintViolationError("people", "name"),
+        );
       }),
     );
   });
@@ -181,9 +183,8 @@ describe("#insert", () => {
 
           const records = await dataStore.select("people");
 
-          expect(records).toHaveLength(1);
-          expect(records[0]).toHaveProperty("name");
-          expect(records[0].name).toEqual("John Doe");
+          assert.equal(records.length, 1, "1 record found");
+          assert.equal(records[0].name, "John Doe");
         }),
       );
     });
@@ -196,9 +197,8 @@ describe("#insert", () => {
 
           const records = await dataStore.select("people");
 
-          expect(records).toHaveLength(1);
-          expect(records[0]).toHaveProperty("name");
-          expect(records[0].name).toEqual("Jane Doe");
+          assert.equal(records.length, 1, "1 record found");
+          assert.equal(records[0].name, "Jane Doe");
         }),
       );
     });

@@ -1,3 +1,5 @@
+import assert from "node:assert";
+import { describe, it } from "node:test";
 import type { Schema } from "./sqlite-datastore.ts";
 import { NoSuchTableError } from "./sqlite-datastore.ts";
 import { runSql, testWithSchema } from "./test-utils.ts";
@@ -31,7 +33,7 @@ describe("#select", () => {
 
         const records = await dataStore.select("people");
 
-        expect(records).toEqual([
+        assert.deepStrictEqual(records, [
           { id: 1, name: "foo", birthdate: null },
           { id: 2, name: "bar", birthdate: null },
         ]);
@@ -50,7 +52,9 @@ describe("#select", () => {
           where: { name: "foo" },
         });
 
-        expect(records).toEqual([{ id: 1, name: "foo", birthdate: null }]);
+        assert.deepStrictEqual(records, [
+          { id: 1, name: "foo", birthdate: null },
+        ]);
       }),
     );
   });
@@ -67,7 +71,7 @@ describe("#select", () => {
           where: { name: ["foo", "bar"] },
         });
 
-        expect(records).toEqual([
+        assert.deepStrictEqual(records, [
           { id: 1, name: "foo", birthdate: null },
           { id: 2, name: "bar", birthdate: null },
         ]);
@@ -85,14 +89,16 @@ describe("#select", () => {
             { name: "bar" },
           ]);
 
-          expect(result).toHaveProperty("count", 2);
-          expect(result).toHaveProperty("ids", [1, 2]);
+          assert.equal(result["count"], 2, "count");
+          assert.deepStrictEqual(result["ids"], [1, 2]);
 
           const records = await dataStore.select("people", {
             where: { id: 1 },
           });
 
-          expect(records).toEqual([{ id: 1, name: "foo", birthdate: null }]);
+          assert.deepStrictEqual(records, [
+            { id: 1, name: "foo", birthdate: null },
+          ]);
         }),
       );
     });
@@ -122,7 +128,7 @@ describe("#select", () => {
           where: { name: "foo", birthdate: "2000-01-01" },
         });
 
-        expect(records).toEqual([
+        assert.deepStrictEqual(records, [
           { id: 1, name: "foo", birthdate: "2000-01-01" },
         ]);
       }),
@@ -156,7 +162,7 @@ describe("#select", () => {
           where: { age: 20 as number | bigint },
         });
 
-        expect(records).toEqual([{ id: 1, name: "foo", age: 20 }]);
+        assert.deepStrictEqual(records, [{ id: 1, name: "foo", age: 20 }]);
       }),
     );
   });
@@ -173,7 +179,7 @@ describe("#select", () => {
           where: { name: { like: "ba%" } },
         });
 
-        expect(records).toEqual([
+        assert.deepStrictEqual(records, [
           { id: 2, name: "bar", birthdate: null },
           { id: 3, name: "baz", birthdate: null },
         ]);
@@ -193,7 +199,9 @@ describe("#select", () => {
           where: { name: { eq: "foo" } },
         });
 
-        expect(records).toEqual([{ id: 1, name: "foo", birthdate: null }]);
+        assert.deepStrictEqual(records, [
+          { id: 1, name: "foo", birthdate: null },
+        ]);
       }),
     );
   });
@@ -210,7 +218,7 @@ describe("#select", () => {
           where: { name: { neq: "foo" } },
         });
 
-        expect(records).toEqual([
+        assert.deepStrictEqual(records, [
           { id: 2, name: "bar", birthdate: null },
           { id: 3, name: "baz", birthdate: null },
         ]);
@@ -249,7 +257,7 @@ describe("#select", () => {
 
         const actual = await dataStore.select("events");
 
-        expect(actual).toEqual([
+        assert.deepStrictEqual(actual, [
           {
             id: 1,
             name: "Birthday party",
@@ -291,7 +299,7 @@ describe("#select", () => {
 
         const actual = await dataStore.select("events");
 
-        expect(actual).toEqual([
+        assert.deepStrictEqual(actual, [
           {
             id: 1,
             name: "Date night",
@@ -309,7 +317,8 @@ describe("#select", () => {
         await dataStore.migrate();
         await runSql(db, "DROP TABLE people");
 
-        await expect(dataStore.select("people")).rejects.toThrow(
+        await assert.rejects(
+          dataStore.select("people"),
           new NoSuchTableError("people"),
         );
       }),

@@ -1,3 +1,5 @@
+import assert from "node:assert";
+import { describe, it } from "node:test";
 import type { Schema } from "../sqlite-datastore.ts";
 import { InsertError, UpdateError } from "../sqlite-datastore.ts";
 import { all, testWithSchema } from "../test-utils.ts";
@@ -28,7 +30,7 @@ describe("insert_timestamp custom type", () => {
         const columns = await all(db, `PRAGMA table_info(people)`);
         const col = columns.find((c) => (c as any).name === "created_at");
 
-        expect(col).toEqual({
+        assert.deepStrictEqual(col, {
           cid: 2,
           name: "created_at",
           type: "TEXT",
@@ -49,14 +51,18 @@ describe("insert_timestamp custom type", () => {
 
           const records = await dataStore.select("people");
 
-          expect(records).toHaveLength(1);
+          assert.equal(records.length, 1, "1 record found");
 
-          expect(records[0]).toHaveProperty("created_at");
-          expect(records[0].created_at).toBeInstanceOf(Date);
-          expect(records[0].created_at).not.toBeNaN();
+          assert(records[0].created_at instanceof Date, "created_at is a Date");
 
-          expect(Date.now() - records[0].created_at.getTime()).toBeLessThan(
-            1000,
+          assert(
+            !isNaN(Number(records[0].created_at)),
+            "created_at is not NaN",
+          );
+
+          assert(
+            Date.now() - records[0].created_at.getTime() < 1000,
+            "created_at is within 1s of now",
           );
         }),
       );
@@ -66,12 +72,13 @@ describe("insert_timestamp custom type", () => {
       it(
         "throws an InsertError",
         testWithSchema(SCHEMA, async (dataStore) => {
-          await expect(
+          await assert.rejects(
             dataStore.insert("people", {
               name: "foo",
               created_at: new Date(),
             }),
-          ).rejects.toThrow(InsertError);
+            InsertError,
+          );
         }),
       );
     });
@@ -80,12 +87,13 @@ describe("insert_timestamp custom type", () => {
       it(
         "throws an InsertError",
         testWithSchema(SCHEMA, async (dataStore, db) => {
-          await expect(
+          await assert.rejects(
             dataStore.insert("people", {
               name: "foo",
               created_at: new Date(),
             }),
-          ).rejects.toThrow(InsertError);
+            InsertError,
+          );
         }),
       );
     });
@@ -94,12 +102,13 @@ describe("insert_timestamp custom type", () => {
       it(
         "throws an InsertError",
         testWithSchema(SCHEMA, async (dataStore) => {
-          await expect(
+          await assert.rejects(
             dataStore.insert("people", {
               name: "foo",
               created_at: new Date(),
             }),
-          ).rejects.toThrow(InsertError);
+            InsertError,
+          );
         }),
       );
     });
@@ -114,13 +123,14 @@ describe("insert_timestamp custom type", () => {
             name: "foo",
           });
 
-          expect(
+          assert.rejects(
             dataStore.update("people", {
               set: {
                 created_at: new Date(),
               },
             }),
-          ).rejects.toThrow(UpdateError);
+            UpdateError,
+          );
         }),
       );
     });

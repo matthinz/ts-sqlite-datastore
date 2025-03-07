@@ -1,3 +1,5 @@
+import assert from "node:assert";
+import { describe, it } from "node:test";
 import type { Schema } from "./sqlite-datastore.ts";
 import { testWithSchema } from "./test-utils.ts";
 
@@ -32,7 +34,7 @@ describe("#count", () => {
         where: { name: ["foo", "bar"] },
       });
 
-      expect(count).toEqual(2);
+      assert.equal(count, 2);
     }),
   );
 });

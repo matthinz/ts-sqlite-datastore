@@ -7,21 +7,14 @@
   "scripts": {
     "build": "rm -rf dist && node_modules/.bin/tsc --erasableSyntaxOnly",
     "start": "node --enable-source-maps dist/index.js",
-    "test": "jest"
+    "test": "node --enable-source-maps --test 'dist/**/*.test.js'"
   },
   "engines": {
     "node": ">=23.6.0"
   },
-  "jest": {
-    "roots": [
-      "dist"
-    ]
-  },
   "devDependencies": {
     "@tsconfig/recommended": "^1.0.8",
-    "@types/jest": "^29.5.14",
     "@types/node": "^22.13.9",
-    "jest": "^29.7.0",
     "prettier": "^3.4.1",
     "prettier-plugin-organize-imports": "^4.1.0",
     "typescript": "^5.8.2"

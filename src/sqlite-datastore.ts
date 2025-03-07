@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import sqlite3, { Database, Statement } from "sqlite3";
+import sqlite3 from "sqlite3";
 
 /*
 
@@ -1027,7 +1027,7 @@ export class UpdateError extends SqliteDatastoreError {
 export class SqliteDatastore<TSchema extends Schema> {
   readonly #filename: string;
   readonly #schema: TSchema;
-  readonly #databasePromise: Promise<Database>;
+  readonly #databasePromise: Promise<sqlite3.Database>;
   #migrated: boolean = false;
 
   constructor({
@@ -1041,7 +1041,7 @@ export class SqliteDatastore<TSchema extends Schema> {
     this.#databasePromise = new Promise((resolve, reject) => {
       const Database = verbose ? sqlite3.verbose().Database : sqlite3.Database;
       const db = new Database(this.#filename, (err) => {
-        const onDatabaseReady = (err: Error | null, db?: Database) => {
+        const onDatabaseReady = (err: Error | null, db?: sqlite3.Database) => {
           if (
             "onDatabaseReady" in rest &&
             typeof rest.onDatabaseReady === "function"
@@ -1703,7 +1703,7 @@ export class SqliteDatastore<TSchema extends Schema> {
     );
   }
 
-  protected migrateIfNeeded(): Promise<Database> {
+  protected migrateIfNeeded(): Promise<sqlite3.Database> {
     return this.#databasePromise.then(async (db) => {
       if (this.#migrated) {
         return db;
@@ -1752,7 +1752,10 @@ export class SqliteDatastore<TSchema extends Schema> {
     return parsedRow;
   }
 
-  protected prepare(sql: string, params?: unknown[]): Promise<Statement> {
+  protected prepare(
+    sql: string,
+    params?: unknown[],
+  ): Promise<sqlite3.Statement> {
     const _self = this;
     return this.#databasePromise.then(
       (db) =>
@@ -1943,7 +1946,7 @@ export class SqliteDatastore<TSchema extends Schema> {
   }
 
   private runStatement(
-    statement: Statement,
+    statement: sqlite3.Statement,
     params?: unknown[],
   ): Promise<{ lastID: number; changes: number }> {
     return new Promise((resolve, reject) => {

@@ -1,5 +1,6 @@
-import type { Schema } from "../sqlite-datastore.ts";
-import { InsertError, UpdateError } from "../sqlite-datastore.ts";
+import assert from "node:assert";
+import { before, describe, it, mock } from "node:test";
+import { InsertError, UpdateError, type Schema } from "../sqlite-datastore.ts";
 import { testWithSchema } from "../test-utils.ts";
 
 const SCHEMA = {
@@ -22,16 +23,8 @@ describe("update_timestamp custom type", () => {
   const NOW = new Date(2025, 1, 17, 12, 13, 14);
   const LATER = new Date(2025, 1, 18, 13, 14, 15);
 
-  beforeAll(() => {
-    jest.useFakeTimers({ advanceTimers: true });
-  });
-
-  beforeEach(() => {
-    jest.setSystemTime(NOW);
-  });
-
-  afterAll(() => {
-    jest.useRealTimers();
+  before(() => {
+    mock.timers.enable({ apis: ["Date"] });
   });
 
   describe("on insert", () => {
@@ -39,12 +32,13 @@ describe("update_timestamp custom type", () => {
       it(
         "throws an InsertError",
         testWithSchema(SCHEMA, async (dataStore) => {
-          await expect(
+          await assert.rejects(
             dataStore.insert("people", {
               name: "foo",
               updated_at: new Date(2000, 0, 5),
             }),
-          ).rejects.toThrow(InsertError);
+            InsertError,
+          );
         }),
       );
     });
@@ -57,11 +51,13 @@ describe("update_timestamp custom type", () => {
             name: "foo",
           });
           const records = await dataStore.select("people");
-          expect(records).toHaveLength(1);
+          assert.equal(records.length, 1);
 
-          expect(records[0]).toHaveProperty("updated_at");
-          expect(records[0].updated_at).toBeInstanceOf(Date);
-          expect(records[0].updated_at.getTime()).toBeCloseTo(Date.now(), -1);
+          assert(records[0].updated_at instanceof Date, "updated_at is a Date");
+          assert(
+            Date.now() - records[0].updated_at.getTime() < 1000,
+            "updated_at is within 1 second of now",
+          );
         }),
       );
     });
@@ -76,11 +72,12 @@ describe("update_timestamp custom type", () => {
             name: "foo",
           });
 
-          await expect(
+          await assert.rejects(
             dataStore.update("people", {
               set: { name: "bar", updated_at: new Date(2000, 0, 5) },
             }),
-          ).rejects.toThrow(UpdateError);
+            UpdateError,
+          );
         }),
       );
     });
@@ -94,14 +91,14 @@ describe("update_timestamp custom type", () => {
           });
           let records = await dataStore.select("people");
 
-          expect(records).toHaveLength(1);
-          expect(records[0]).toHaveProperty("updated_at");
-          expect(records[0].updated_at).toBeInstanceOf(Date);
-          expect(records[0].updated_at.getTime() - NOW.getTime()).toBeLessThan(
-            1000,
+          assert.equal(records.length, 1);
+          assert(records[0].updated_at instanceof Date);
+          assert(
+            records[0].updated_at.getTime() - NOW.getTime() < 1000,
+            "updated_at is within 1 second of now",
           );
 
-          jest.setSystemTime(LATER);
+          mock.timers.setTime(Number(LATER));
 
           await dataStore.update("people", {
             set: { name: "bar" },
@@ -109,11 +106,11 @@ describe("update_timestamp custom type", () => {
 
           records = await dataStore.select("people");
 
-          expect(records[0]).toHaveProperty("updated_at");
-          expect(records[0].updated_at).toBeInstanceOf(Date);
-          expect(
-            records[0].updated_at.getTime() - LATER.getTime(),
-          ).toBeLessThan(1000);
+          assert(records[0].updated_at instanceof Date, "updated_at is a Date");
+          assert(
+            records[0].updated_at.getTime() - LATER.getTime() < 1000,
+            "updated_at is within 1 second of the current time",
+          );
         }),
       );
     });

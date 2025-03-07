@@ -8,7 +8,7 @@ test: build
 	@if [ "$(FILTER)" = "" ]; then \
 		yarn test; \
 	else \
-		yarn test -t $(FILTER); \
+		yarn test --test-name-pattern=$(FILTER); \
 	fi
 
 dist: node_modules $(SOURCES)

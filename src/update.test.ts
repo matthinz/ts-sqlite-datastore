@@ -1,3 +1,5 @@
+import assert from "node:assert";
+import { describe, it } from "node:test";
 import type { Schema } from "./sqlite-datastore.ts";
 import { createDataStore } from "./test-utils.ts";
 
@@ -35,10 +37,10 @@ describe("#update", () => {
           name: "baz",
         },
       });
-      expect(result).toHaveProperty("count", 2);
+      assert.equal(result["count"], 2, "count");
 
       const records = await dataStore.select("people");
-      expect(records).toEqual([
+      assert.deepStrictEqual(records, [
         { id: 1, name: "baz", birthdate: null },
         { id: 2, name: "baz", birthdate: null },
       ]);
@@ -62,11 +64,11 @@ describe("#update", () => {
       },
     });
 
-    expect(result).toHaveProperty("count", 1);
+    assert.equal(result["count"], 1, "count");
 
     const records = await dataStore.select("people");
 
-    expect(records).toEqual([
+    assert.deepStrictEqual(records, [
       { id: 1, name: "baz", birthdate: null },
       { id: 2, name: "bar", birthdate: null },
     ]);
