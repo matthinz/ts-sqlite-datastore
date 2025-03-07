@@ -7,7 +7,8 @@
   "scripts": {
     "build": "rm -rf dist && node_modules/.bin/tsc --erasableSyntaxOnly",
     "start": "node --enable-source-maps dist/index.js",
-    "test": "node --enable-source-maps --test 'dist/**/*.test.js'"
+    "test": "node --enable-source-maps --test 'dist/**/*.test.js'",
+    "test:ts": "node --enable-source-maps --test 'src/**/*.test.ts'"
   },
   "engines": {
     "node": ">=23.6.0"
